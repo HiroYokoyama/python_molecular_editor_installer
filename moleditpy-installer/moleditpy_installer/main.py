@@ -112,11 +112,13 @@ def create_shortcut():
             print(f"Successfully created '{shortcut_name}' in the application menu.")
         
         elif system == "Darwin":
-            print("macOS detected. Creating link in /Applications folder...")
+            print("macOS detected. Creating application in /Applications folder...")
             make_shortcut(
                 script=exe_path,
                 name=shortcut_name,
-                icon=icon_path
+                icon=icon_path,
+                desktop=True,
+                terminal=True
             )
             print(f"Successfully created '{shortcut_name}' in /Applications.")
         else:
