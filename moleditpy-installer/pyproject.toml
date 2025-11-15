@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moleditpy-installer"
+version = "0.1.0"
+authors = [
+  { name="HiroYokoyama", email="titech.yoko.hiro@gmail.com" },
+]
+description = "Installer and shortcut creator for moleditpy (OS-dependent)"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "pyshortcuts >= 1.0.0", 
+    "moleditpy-linux; sys_platform == 'linux'",
+    "moleditpy; sys_platform == 'win32'",
+    "moleditpy; sys_platform == 'darwin'"
+]
+
+[project.scripts]
+moleditpy-installer = "moleditpy_installer.main:create_shortcut"
+
+[tool.setuptools.package-data]
+"moleditpy_installer" = ["data/*.ico", "data/*.icns", "data/*.png"]
+
+

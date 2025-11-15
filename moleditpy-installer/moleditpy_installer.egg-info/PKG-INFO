@@ -1,0 +1,35 @@
+Metadata-Version: 2.4
+Name: moleditpy-installer
+Version: 0.1.0
+Summary: Installer and shortcut creator for moleditpy (OS-dependent)
+Author-email: HiroYokoyama <titech.yoko.hiro@gmail.com>
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: pyshortcuts>=1.0.0
+Requires-Dist: moleditpy-linux; sys_platform == "linux"
+Requires-Dist: moleditpy; sys_platform == "win32"
+Requires-Dist: moleditpy; sys_platform == "darwin"
+
+# Moleditpy Installer
+
+This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS and creates an application menu shortcut.
+
+## How to Use
+
+1.  **Install**
+    ```bash
+    pip install moleditpy-installer
+    ```
+    This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
+
+2.  **Create Shortcut**
+    After installation, run the following command in your terminal to create the shortcut in your application menu (e.g., Start Menu on Windows).
+
+    ```bash
+    moleditpy-installer
+    ```
+
+    

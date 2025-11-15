@@ -1,0 +1,10 @@
+pyshortcuts>=1.0.0
+
+[:sys_platform == "darwin"]
+moleditpy
+
+[:sys_platform == "linux"]
+moleditpy-linux
+
+[:sys_platform == "win32"]
+moleditpy

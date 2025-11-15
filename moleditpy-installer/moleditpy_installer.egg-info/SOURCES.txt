@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+moleditpy_installer/__init__.py
+moleditpy_installer/main.py
+moleditpy_installer.egg-info/PKG-INFO
+moleditpy_installer.egg-info/SOURCES.txt
+moleditpy_installer.egg-info/dependency_links.txt
+moleditpy_installer.egg-info/entry_points.txt
+moleditpy_installer.egg-info/requires.txt
+moleditpy_installer.egg-info/top_level.txt
+moleditpy_installer/data/icon.icns
+moleditpy_installer/data/icon.ico
+moleditpy_installer/data/icon.png
