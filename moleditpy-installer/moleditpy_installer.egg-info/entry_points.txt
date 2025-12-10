@@ -1,2 +1,2 @@
 [console_scripts]
-moleditpy-installer = moleditpy_installer.main:create_shortcut
+moleditpy-installer = moleditpy_installer.main:main

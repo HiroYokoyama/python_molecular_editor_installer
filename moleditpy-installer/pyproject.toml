@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-installer"
-version = "0.1.3"
+version = "1.0.1"
 authors = [
   { name="HiroYokoyama", email="titech.yoko.hiro@gmail.com" },
 ]
 description = "Installer and shortcut creator for moleditpy (OS-dependent)"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Operating System :: OS Independent",
@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
-moleditpy-installer = "moleditpy_installer.main:create_shortcut"
+moleditpy-installer = "moleditpy_installer.main:main"
 
 [tool.setuptools.package-data]
 "moleditpy_installer" = ["data/*.ico", "data/*.icns", "data/*.png"]
