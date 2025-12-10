@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: moleditpy-installer
-Version: 1.0.1
+Version: 1.0.2
 Summary: Installer and shortcut creator for moleditpy (OS-dependent)
 Author-email: HiroYokoyama <titech.yoko.hiro@gmail.com>
 License:                     GNU GENERAL PUBLIC LICENSE
@@ -691,7 +691,7 @@ Requires-Dist: moleditpy; sys_platform == "win32"
 Requires-Dist: moleditpy; sys_platform == "darwin"
 Dynamic: license-file
 
-# Moleditpy Installer
+# MoleditPy Installer
 
 This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers file associations (Windows only).
 

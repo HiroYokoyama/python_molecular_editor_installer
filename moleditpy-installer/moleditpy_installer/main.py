@@ -12,7 +12,10 @@ import platform
 import importlib.resources
 import os
 import sys
-import winreg
+try:
+    import winreg
+except ImportError:
+    winreg = None
 from pathlib import Path
 from typing import Optional
 from pyshortcuts import make_shortcut

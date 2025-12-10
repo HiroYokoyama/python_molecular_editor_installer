@@ -29,5 +29,4 @@ This package is a helper utility that automatically installs the correct version
 
     ```bash
     moleditpy-installer --help
-
     ```
