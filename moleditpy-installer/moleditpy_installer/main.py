@@ -260,6 +260,23 @@ def remove_shortcut() -> None:
         print(f"Shortcut not found at expected location: {shortcut_path}")
 
 
+def get_file_icon_path() -> Optional[str]:
+    """
+    Gets the absolute path to the file icon (file_icon.ico) for Windows associations.
+    """
+    if platform.system() != "Windows":
+        return None
+
+    try:
+        ref = importlib.resources.files("moleditpy_installer") / "data" / "file_icon.ico"
+        with importlib.resources.as_file(ref) as path:
+            if path.exists():
+                return str(path)
+    except Exception as e:
+        print(f"Error finding file icon: {e}")
+
+    return None
+
 def install() -> None:
     """
     Creates a shortcut for the installed moleditpy executable.
@@ -353,7 +370,11 @@ def install() -> None:
     
     # Register file associations on Windows
     if system == "Windows" and original_exe_path:
-        register_file_associations_windows(str(original_exe_path), icon_path)
+        file_icon_path = get_file_icon_path()
+        if not file_icon_path:
+            file_icon_path = icon_path
+
+        register_file_associations_windows(str(original_exe_path), file_icon_path)
 
         print("\nYou can remove the shortcut and file associations by running:")
         print("  moleditpy-installer --remove")
