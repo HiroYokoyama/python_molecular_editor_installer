@@ -17,11 +17,21 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer
     ```
 
+    You can also invoke it as a Python module (use an **underscore**, not a hyphen):
+
+    ```bash
+    python -m moleditpy_installer
+    ```
+
+    > **Note:** `python -m moleditpy-installer` (with a hyphen) is invalid Python syntax and will not work. Always use the underscore form (`moleditpy_installer`) with `-m`.
+
 3.  **Remove Shortcut**
     To remove the shortcut and unregister file associations, run:
 
     ```bash
     moleditpy-installer --remove
+    # or
+    python -m moleditpy_installer --remove
     ```
 
 4.  **Help**
