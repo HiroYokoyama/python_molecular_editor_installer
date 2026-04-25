@@ -577,6 +577,10 @@ class TestInstall:
         with (
             mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
             mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "get_file_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "register_file_associations_windows", return_value=True
+            ),
             mock.patch("platform.system", return_value="Windows"),
             mock.patch(
                 "moleditpy_installer.main.make_shortcut", side_effect=OSError("disk full")
