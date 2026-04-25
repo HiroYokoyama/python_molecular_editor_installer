@@ -1,2 +1,0 @@
-[console_scripts]
-moleditpy-installer = moleditpy_installer.main:main
