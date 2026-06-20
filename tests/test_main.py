@@ -154,6 +154,50 @@ class TestFindExecutable:
 
         assert result is None
 
+    @pytest.mark.skipif(platform.system() == "Windows", reason="Unix layout only")
+    def test_finds_exe_in_user_local_bin(self, tmp_path):
+        """~/.local/bin is searched for pip --user installs on Linux/macOS."""
+        user_local_bin = tmp_path / ".local" / "bin"
+        user_local_bin.mkdir(parents=True)
+        _make_fake_exe(user_local_bin, "moleditpy")
+
+        fake_python_dir = tmp_path / "python_dir"
+        fake_python_dir.mkdir()
+
+        with (
+            mock.patch.object(installer_main.sys, "executable", str(fake_python_dir / "python")),
+            mock.patch.object(installer_main.sys, "argv", [str(fake_python_dir / "script.py")]),
+            mock.patch("shutil.which", return_value=None),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert "moleditpy" in result
+
+    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
+    def test_finds_exe_in_localappdata_scripts(self, tmp_path):
+        """User-level Python Scripts dir under %LOCALAPPDATA% is searched on Windows."""
+        scripts_dir = tmp_path / "Programs" / "Python312" / "Scripts"
+        scripts_dir.mkdir(parents=True)
+        _make_fake_exe(scripts_dir, "moleditpy")
+
+        fake_python_dir = tmp_path / "python_dir"
+        fake_python_dir.mkdir()
+
+        with (
+            mock.patch.object(
+                installer_main.sys, "executable", str(fake_python_dir / "python.exe")
+            ),
+            mock.patch.object(installer_main.sys, "argv", [str(fake_python_dir / "script.py")]),
+            mock.patch("shutil.which", return_value=None),
+            mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}, clear=False),
+        ):
+            result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert "moleditpy" in result.lower()
+
 
 # ---------------------------------------------------------------------------
 # get_icon_path
@@ -570,6 +614,25 @@ class TestInstall:
         script_arg = mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
         # base env → target is the app exe directly, not the conda wrapper
         assert script_arg == fake_exe
+
+    @pytest.mark.skipif(platform.system() != "Linux", reason="Linux fallback only")
+    def test_install_falls_back_to_moleditpy_linux(self, tmp_path):
+        """On Linux, if 'moleditpy' is not found, 'moleditpy-linux' is tried."""
+        fake_exe = str(tmp_path / "moleditpy-linux")
+
+        def fake_find(name):
+            return fake_exe if name == "moleditpy-linux" else None
+
+        with (
+            mock.patch.object(installer_main, "find_executable", side_effect=fake_find),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install()
+
+        mock_shortcut.assert_called_once()
 
     def test_install_handles_make_shortcut_oserror(self, tmp_path, capsys):
         fake_exe = str(tmp_path / "moleditpy.exe")

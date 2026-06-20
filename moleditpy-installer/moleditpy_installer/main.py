@@ -65,9 +65,11 @@ def find_executable(name: str) -> Optional[str]:
     Finds the path to the specified executable.
 
     Search order:
-      1. Scripts/bin directory next to sys.executable (handles `python -m` invocation).
-      2. Same directory as sys.argv[0] (handles direct script invocation).
-      3. System PATH via shutil.which.
+      1. Scripts/bin directory next to sys.executable (handles venv/conda layout).
+      2. Same directory as sys.executable.
+      3. Same directory as sys.argv[0] (direct script invocation).
+      4. User-local install dirs (~/.local/bin on Linux/macOS; user-level Scripts on Windows).
+      5. System PATH via shutil.which.
 
     Args:
         name (str): The name of the executable (e.g., 'moleditpy').
@@ -87,7 +89,7 @@ def find_executable(name: str) -> Optional[str]:
             return result
         return None
 
-    # 1. Dirs relative to the Python interpreter (reliable even under `python -m`)
+    # 1 & 2. Dirs relative to the Python interpreter (reliable even under `python -m`)
     python_dir = Path(sys.executable).resolve().parent
     for scripts_dir in (
         python_dir / "Scripts",
@@ -97,13 +99,31 @@ def find_executable(name: str) -> Optional[str]:
         if found:
             return found
 
-    # 2. Same directory as the entry-point script (pip-installed console_scripts wrapper)
+    # 3. Same directory as the entry-point script (pip-installed console_scripts wrapper)
     script_dir = Path(sys.argv[0]).resolve().parent
     found = _check(script_dir)
     if found:
         return found
 
-    # 3. Fallback: system PATH
+    # 4. User-local installation directories (pip install --user)
+    if system == "Windows":
+        # %LOCALAPPDATA%\Programs\Python\PythonXY\Scripts  (user-level installer)
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            for scripts_dir in sorted(
+                (Path(local_app_data) / "Programs").glob("Python*/Scripts"),
+                reverse=True,  # prefer the newest Python version
+            ):
+                found = _check(scripts_dir)
+                if found:
+                    return found
+    else:
+        # ~/.local/bin is the standard target for `pip install --user` on Linux/macOS
+        found = _check(Path.home() / ".local" / "bin")
+        if found:
+            return found
+
+    # 5. Fallback: system PATH
     path_from_shutil = shutil.which(name)
     if path_from_shutil:
         print(f"Found executable in system PATH: {path_from_shutil}")
@@ -325,10 +345,18 @@ def install() -> None:
     print(f"Searching for the executable '{command_name}'...")
     original_exe_path = find_executable(command_name)
 
+    # On Linux the package may install as 'moleditpy-linux' instead of 'moleditpy'
+    if not original_exe_path and platform.system() == "Linux":
+        alt_name = "moleditpy-linux"
+        print(f"Not found. Trying alternate name '{alt_name}'...")
+        original_exe_path = find_executable(alt_name)
+        if original_exe_path:
+            command_name = alt_name
+
     if not original_exe_path:
-        print(f"Error: Command '{command_name}' not found.")
-        print("Please ensure 'moleditpy' (or 'moleditpy-linux') is installed correctly")
-        print("and that its location is available.")
+        print(f"Error: Command '{command_name}' (or 'moleditpy-linux') not found.")
+        print("Please ensure the package is installed correctly and that")
+        print("its Scripts/bin directory is accessible.")
         return
 
     # ショートカット作成用の変数を初期化 (Initialize shortcut variables)
