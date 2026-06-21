@@ -219,8 +219,8 @@ class TestFindExecutable:
         assert result is not None
         assert "moleditpy" in result
 
-    def test_finds_exe_via_sysconfig_user_scheme(self, tmp_path):
-        """User scheme from sysconfig is searched for executables."""
+    def test_finds_exe_via_sysconfig_user_scheme_windows(self, tmp_path):
+        """User scheme from sysconfig (nt_user) is searched on Windows."""
         sysconfig_bin = tmp_path / "sysconfig_bin"
         sysconfig_bin.mkdir()
         _make_fake_exe(sysconfig_bin, "moleditpy")
@@ -228,9 +228,32 @@ class TestFindExecutable:
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
 
-        scheme = "nt_user" if platform.system() == "Windows" else "posix_user"
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch.object(
+                installer_main.sys, "executable", str(fake_python_dir / "python.exe")
+            ),
+            mock.patch.object(
+                installer_main.sys, "argv", [str(fake_python_dir / "script.py")]
+            ),
+            mock.patch("shutil.which", return_value=None),
+            mock.patch("sysconfig.get_path", return_value=str(sysconfig_bin)),
+        ):
+            result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert "moleditpy" in result.lower()
+
+    def test_finds_exe_via_sysconfig_user_scheme_posix(self, tmp_path):
+        """User scheme from sysconfig (posix_user) is searched on Unix/Linux/macOS."""
+        sysconfig_bin = tmp_path / "sysconfig_bin"
+        sysconfig_bin.mkdir()
+
+        fake_python_dir = tmp_path / "python_dir"
+        fake_python_dir.mkdir()
 
         with (
+            mock.patch("platform.system", return_value="Linux"),
             mock.patch.object(
                 installer_main.sys, "executable", str(fake_python_dir / "python")
             ),
@@ -238,13 +261,14 @@ class TestFindExecutable:
                 installer_main.sys, "argv", [str(fake_python_dir / "script.py")]
             ),
             mock.patch("shutil.which", return_value=None),
-            mock.patch("sysconfig.get_scheme_names", return_value=[scheme]),
+            mock.patch("sysconfig.get_scheme_names", return_value=["posix_user"]),
             mock.patch("sysconfig.get_path", return_value=str(sysconfig_bin)),
         ):
+            _make_fake_exe(sysconfig_bin, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
-        assert "moleditpy" in result.lower()
+        assert Path(result).name == "moleditpy"
 
     @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
     def test_finds_exe_in_localappdata_scripts(self, tmp_path):
@@ -456,6 +480,33 @@ class TestFindExecutable:
             ),
             mock.patch("shutil.which", return_value=None),
             mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
+        ):
+            result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert "moleditpy" in result.lower()
+
+    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
+    def test_finds_exe_in_poetry_windows(self, tmp_path):
+        """Poetry global scripts are searched on Windows."""
+        scripts_dir = tmp_path / "pypoetry" / "venv" / "Scripts"
+        scripts_dir.mkdir(parents=True)
+        _make_fake_exe(scripts_dir, "moleditpy")
+
+        fake_python_dir = tmp_path / "python_dir"
+        fake_python_dir.mkdir()
+
+        with (
+            mock.patch.object(
+                installer_main.sys, "executable", str(fake_python_dir / "python.exe")
+            ),
+            mock.patch.object(
+                installer_main.sys, "argv", [str(fake_python_dir / "script.py")]
+            ),
+            mock.patch("shutil.which", return_value=None),
+            mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}, clear=False),
+            mock.patch.dict(os.environ, {"APPDATA": str(tmp_path)}, clear=False),
             mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
         ):
             result = installer_main.find_executable("moleditpy")
@@ -1056,6 +1107,48 @@ class TestMainCLI:
         assert excinfo.value.code == 0
         captured = capsys.readouterr()
         assert "1.4.0" in captured.out or "1.4.0" in captured.err
+
+    def test_main_check_flag_success(self, capsys):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--check"]),
+            mock.patch(
+                "moleditpy_installer.main.find_executable",
+                return_value="/path/to/moleditpy",
+            ),
+            mock.patch("platform.system", return_value="Windows"),
+        ):
+            result = installer_main.main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Success: Found executable" in captured.out
+        assert "/path/to/moleditpy" in captured.out
+
+    def test_main_check_flag_failure(self, capsys):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--check"]),
+            mock.patch("moleditpy_installer.main.find_executable", return_value=None),
+            mock.patch("platform.system", return_value="Windows"),
+        ):
+            result = installer_main.main()
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Error: Executable" in captured.out
+
+    def test_main_check_flag_linux_fallback(self, capsys):
+        def fake_find(name):
+            return "/path/to/moleditpy-linux" if name == "moleditpy-linux" else None
+
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--check"]),
+            mock.patch(
+                "moleditpy_installer.main.find_executable", side_effect=fake_find
+            ),
+            mock.patch("platform.system", return_value="Linux"),
+        ):
+            result = installer_main.main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Success: Found executable 'moleditpy-linux'" in captured.out
 
 
 # ---------------------------------------------------------------------------

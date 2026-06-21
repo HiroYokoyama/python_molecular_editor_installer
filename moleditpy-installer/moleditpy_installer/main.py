@@ -600,6 +600,11 @@ def main() -> int:
         help="Remove the shortcut and unregister file associations.",
     )
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Search for the moleditpy executable in search paths, print the result, and exit.",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {get_installer_version()}",
@@ -610,10 +615,24 @@ def main() -> int:
 
     if args.remove:
         remove_shortcut()
+        return 0
+    elif args.check:
+        command_name = "moleditpy"
+        path = find_executable(command_name)
+        if not path and platform.system() == "Linux":
+            command_name = "moleditpy-linux"
+            path = find_executable(command_name)
+        if path:
+            print(f"Success: Found executable '{command_name}' at: {path}")
+            return 0
+        else:
+            print(
+                f"Error: Executable '{command_name}' (or 'moleditpy-linux') was not found in any search paths."
+            )
+            return 1
     else:
         install()
-
-    return 0
+        return 0
 
 
 if __name__ == "__main__":
