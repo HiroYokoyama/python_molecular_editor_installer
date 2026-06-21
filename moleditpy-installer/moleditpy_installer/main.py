@@ -164,6 +164,25 @@ def find_executable(name: str) -> Optional[str]:
             if found:
                 return found
 
+        # pyenv-win versions on Windows (e.g., ~/.pyenv/pyenv-win/versions/X.Y.Z/Scripts)
+        for scripts_dir in sorted(
+            (Path.home() / ".pyenv" / "pyenv-win" / "versions").glob("*/Scripts"),
+            reverse=True,
+        ):
+            found = _check(scripts_dir)
+            if found:
+                return found
+
+        # Poetry global binaries on Windows
+        poetry_paths = []
+        if app_data:
+            poetry_paths.append(Path(app_data) / "pypoetry" / "venv" / "Scripts")
+        poetry_paths.append(Path.home() / ".poetry" / "bin")
+        for path in poetry_paths:
+            found = _check(path)
+            if found:
+                return found
+
     else:
         # Check standard user directories via sysconfig schemes (e.g. posix_user, osx_framework_user)
         for scheme in ("posix_user", "osx_framework_user"):
@@ -199,6 +218,26 @@ def find_executable(name: str) -> Optional[str]:
             if found:
                 return found
 
+        # ASDF python installations (e.g., ~/.asdf/installs/python/X.Y.Z/bin)
+        for scripts_dir in sorted(
+            (Path.home() / ".asdf" / "installs" / "python").glob("*/bin"),
+            reverse=True,
+        ):
+            found = _check(scripts_dir)
+            if found:
+                return found
+
+        # Mise (formerly RTX) python installations (e.g., ~/.local/share/mise/installs/python/X.Y.Z/bin)
+        for scripts_dir in sorted(
+            (Path.home() / ".local" / "share" / "mise" / "installs" / "python").glob(
+                "*/bin"
+            ),
+            reverse=True,
+        ):
+            found = _check(scripts_dir)
+            if found:
+                return found
+
         # Common user Conda installations and environment folders
         conda_globs = [
             (Path.home() / "miniconda3" / "envs").glob("*/bin"),
@@ -218,6 +257,8 @@ def find_executable(name: str) -> Optional[str]:
             Path.home() / ".linuxbrew" / "bin",
             Path.home() / ".nix-profile" / "bin",
             Path.home() / ".guix-profile" / "bin",
+            Path.home() / ".asdf" / "shims",
+            Path.home() / ".poetry" / "bin",
             Path.home() / "bin",
             Path.home() / ".bin",
         ]
@@ -538,6 +579,16 @@ def install() -> None:
         print("  moleditpy-installer --remove")
 
 
+def get_installer_version() -> str:
+    """Gets the version of the installer package."""
+    try:
+        from importlib.metadata import version
+
+        return version("moleditpy-installer")
+    except Exception:
+        return "1.4.0"  # Fallback
+
+
 def main() -> int:
     """Parse CLI arguments and run install or remove."""
     parser = argparse.ArgumentParser(
@@ -547,6 +598,12 @@ def main() -> int:
         "--remove",
         action="store_true",
         help="Remove the shortcut and unregister file associations.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {get_installer_version()}",
+        help="Show the version of the installer and exit.",
     )
 
     args = parser.parse_args()

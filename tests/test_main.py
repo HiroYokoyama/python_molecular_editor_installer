@@ -435,6 +435,95 @@ class TestFindExecutable:
         assert result is not None
         assert "moleditpy" in result
 
+    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
+    def test_finds_exe_in_pyenv_win(self, tmp_path):
+        """pyenv-win version binaries are searched on Windows."""
+        scripts_dir = (
+            tmp_path / ".pyenv" / "pyenv-win" / "versions" / "3.12.0" / "Scripts"
+        )
+        scripts_dir.mkdir(parents=True)
+        _make_fake_exe(scripts_dir, "moleditpy")
+
+        fake_python_dir = tmp_path / "python_dir"
+        fake_python_dir.mkdir()
+
+        with (
+            mock.patch.object(
+                installer_main.sys, "executable", str(fake_python_dir / "python.exe")
+            ),
+            mock.patch.object(
+                installer_main.sys, "argv", [str(fake_python_dir / "script.py")]
+            ),
+            mock.patch("shutil.which", return_value=None),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
+        ):
+            result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert "moleditpy" in result.lower()
+
+    def test_finds_exe_in_asdf(self, tmp_path):
+        """ASDF python installations are searched on macOS/Linux."""
+        scripts_dir = tmp_path / ".asdf" / "installs" / "python" / "3.12.0" / "bin"
+        scripts_dir.mkdir(parents=True)
+
+        fake_python_dir = tmp_path / "python_dir"
+        fake_python_dir.mkdir()
+
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main.sys, "executable", str(fake_python_dir / "python")
+            ),
+            mock.patch.object(
+                installer_main.sys, "argv", [str(fake_python_dir / "script.py")]
+            ),
+            mock.patch("shutil.which", return_value=None),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch("sysconfig.get_scheme_names", return_value=[]),
+        ):
+            _make_fake_exe(scripts_dir, "moleditpy")
+            result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert Path(result).name == "moleditpy"
+
+    def test_finds_exe_in_mise(self, tmp_path):
+        """Mise python installations are searched on macOS/Linux."""
+        scripts_dir = (
+            tmp_path
+            / ".local"
+            / "share"
+            / "mise"
+            / "installs"
+            / "python"
+            / "3.12.0"
+            / "bin"
+        )
+        scripts_dir.mkdir(parents=True)
+
+        fake_python_dir = tmp_path / "python_dir"
+        fake_python_dir.mkdir()
+
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main.sys, "executable", str(fake_python_dir / "python")
+            ),
+            mock.patch.object(
+                installer_main.sys, "argv", [str(fake_python_dir / "script.py")]
+            ),
+            mock.patch("shutil.which", return_value=None),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch("sysconfig.get_scheme_names", return_value=[]),
+        ):
+            _make_fake_exe(scripts_dir, "moleditpy")
+            result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert Path(result).name == "moleditpy"
+
 
 # ---------------------------------------------------------------------------
 # get_icon_path
@@ -945,6 +1034,28 @@ class TestMainCLI:
             result = installer_main.main()
         mock_remove.assert_called_once()
         assert result == 0
+
+    def test_get_installer_version(self):
+        # Test returning version from metadata when package is installed
+        with mock.patch("importlib.metadata.version", return_value="2.0.0"):
+            assert installer_main.get_installer_version() == "2.0.0"
+
+        # Test default fallback when package not installed
+        with mock.patch("importlib.metadata.version", side_effect=Exception):
+            assert installer_main.get_installer_version() == "1.4.0"
+
+    def test_main_version_flag(self, capsys):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--version"]),
+            mock.patch(
+                "moleditpy_installer.main.get_installer_version", return_value="1.4.0"
+            ),
+        ):
+            with pytest.raises(SystemExit) as excinfo:
+                installer_main.main()
+        assert excinfo.value.code == 0
+        captured = capsys.readouterr()
+        assert "1.4.0" in captured.out or "1.4.0" in captured.err
 
 
 # ---------------------------------------------------------------------------
