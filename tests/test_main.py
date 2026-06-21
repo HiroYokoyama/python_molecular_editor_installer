@@ -270,17 +270,16 @@ class TestFindExecutable:
         assert result is not None
         assert Path(result).name == "moleditpy"
 
-    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
     def test_finds_exe_in_localappdata_scripts(self, tmp_path):
         """User-level Python Scripts dir under %LOCALAPPDATA% is searched on Windows."""
         scripts_dir = tmp_path / "Programs" / "Python312" / "Scripts"
         scripts_dir.mkdir(parents=True)
-        _make_fake_exe(scripts_dir, "moleditpy")
 
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
 
         with (
+            mock.patch("platform.system", return_value="Windows"),
             mock.patch.object(
                 installer_main.sys, "executable", str(fake_python_dir / "python.exe")
             ),
@@ -290,12 +289,12 @@ class TestFindExecutable:
             mock.patch("shutil.which", return_value=None),
             mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}, clear=False),
         ):
+            _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
         assert "moleditpy" in result.lower()
 
-    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
     def test_finds_exe_in_ms_store_python_scripts(self, tmp_path):
         """Microsoft Store Python user-level scripts are searched on Windows."""
         scripts_dir = (
@@ -308,12 +307,12 @@ class TestFindExecutable:
             / "Scripts"
         )
         scripts_dir.mkdir(parents=True)
-        _make_fake_exe(scripts_dir, "moleditpy")
 
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
 
         with (
+            mock.patch("platform.system", return_value="Windows"),
             mock.patch.object(
                 installer_main.sys, "executable", str(fake_python_dir / "python.exe")
             ),
@@ -324,22 +323,22 @@ class TestFindExecutable:
             mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}, clear=False),
             mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
         ):
+            _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
         assert "moleditpy" in result.lower()
 
-    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
     def test_finds_exe_in_roaming_appdata_scripts(self, tmp_path):
         """User-level Python Scripts dir under %APPDATA% is searched on Windows."""
         scripts_dir = tmp_path / "Python" / "Python312" / "Scripts"
         scripts_dir.mkdir(parents=True)
-        _make_fake_exe(scripts_dir, "moleditpy")
 
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
 
         with (
+            mock.patch("platform.system", return_value="Windows"),
             mock.patch.object(
                 installer_main.sys, "executable", str(fake_python_dir / "python.exe")
             ),
@@ -350,22 +349,22 @@ class TestFindExecutable:
             mock.patch.dict(os.environ, {"APPDATA": str(tmp_path)}, clear=False),
             mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
         ):
+            _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
         assert "moleditpy" in result.lower()
 
-    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
     def test_finds_exe_in_user_conda_scripts(self, tmp_path):
         """Common user Conda directory is searched on Windows."""
         scripts_dir = tmp_path / "miniconda3" / "Scripts"
         scripts_dir.mkdir(parents=True)
-        _make_fake_exe(scripts_dir, "moleditpy")
 
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
 
         with (
+            mock.patch("platform.system", return_value="Windows"),
             mock.patch.object(
                 installer_main.sys, "executable", str(fake_python_dir / "python.exe")
             ),
@@ -376,6 +375,7 @@ class TestFindExecutable:
             mock.patch("pathlib.Path.home", return_value=tmp_path),
             mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
         ):
+            _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
@@ -459,19 +459,18 @@ class TestFindExecutable:
         assert result is not None
         assert "moleditpy" in result
 
-    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
     def test_finds_exe_in_pyenv_win(self, tmp_path):
         """pyenv-win version binaries are searched on Windows."""
         scripts_dir = (
             tmp_path / ".pyenv" / "pyenv-win" / "versions" / "3.12.0" / "Scripts"
         )
         scripts_dir.mkdir(parents=True)
-        _make_fake_exe(scripts_dir, "moleditpy")
 
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
 
         with (
+            mock.patch("platform.system", return_value="Windows"),
             mock.patch.object(
                 installer_main.sys, "executable", str(fake_python_dir / "python.exe")
             ),
@@ -482,22 +481,22 @@ class TestFindExecutable:
             mock.patch("pathlib.Path.home", return_value=tmp_path),
             mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
         ):
+            _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
         assert "moleditpy" in result.lower()
 
-    @pytest.mark.skipif(platform.system() != "Windows", reason="Windows layout only")
     def test_finds_exe_in_poetry_windows(self, tmp_path):
         """Poetry global scripts are searched on Windows."""
         scripts_dir = tmp_path / "pypoetry" / "venv" / "Scripts"
         scripts_dir.mkdir(parents=True)
-        _make_fake_exe(scripts_dir, "moleditpy")
 
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
 
         with (
+            mock.patch("platform.system", return_value="Windows"),
             mock.patch.object(
                 installer_main.sys, "executable", str(fake_python_dir / "python.exe")
             ),
@@ -509,6 +508,7 @@ class TestFindExecutable:
             mock.patch.dict(os.environ, {"APPDATA": str(tmp_path)}, clear=False),
             mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
         ):
+            _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
