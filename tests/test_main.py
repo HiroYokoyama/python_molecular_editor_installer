@@ -1160,7 +1160,9 @@ class TestMainCLI:
                 installer_main.main()
         assert excinfo.value.code == 0
         captured = capsys.readouterr()
-        assert "1.5.0" in captured.out or "1.5.0" in captured.err
+        output = captured.out or captured.err
+        assert "1.5.0" in output
+        assert "moleditpy-installer" in output
 
     def test_main_help_flag_prints_version(self, capsys):
         with (
@@ -1173,7 +1175,9 @@ class TestMainCLI:
                 installer_main.main()
         assert excinfo.value.code == 0
         captured = capsys.readouterr()
-        assert "1.5.0" in captured.out or "1.5.0" in captured.err
+        output = captured.out or captured.err
+        assert "1.5.0" in output
+        assert "moleditpy-installer" in output
 
     def test_main_check_flag_success(self, capsys):
         with (
