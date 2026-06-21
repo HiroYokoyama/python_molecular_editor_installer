@@ -422,11 +422,11 @@ def remove_shortcut() -> None:
         )
 
     elif system == "Darwin":
-        # In /Applications or ~/Desktop depending on how it was created.
-        # The installer used desktop=True which usually puts it on Desktop
-        # But log said /Applications. Let's check Desktop first as per user plan assumption.
+        # Check ~/Applications first, then fallback to ~/Desktop
         home = Path.home()
-        shortcut_path = home / "Desktop" / f"{shortcut_name}.app"
+        shortcut_path = home / "Applications" / f"{shortcut_name}.app"
+        if not shortcut_path.exists():
+            shortcut_path = home / "Desktop" / f"{shortcut_name}.app"
 
     else:
         print(f"Removal not fully supported/automated for OS: {system}")
@@ -550,8 +550,8 @@ def install() -> None:
             print(f"Successfully created '{shortcut_name}' in the application menu.")
 
         elif system == "Darwin":
-            print("macOS detected. Creating application in /Applications folder...")
-            make_shortcut(
+            print("macOS detected. Creating application shortcut...")
+            scut = make_shortcut(
                 script=full_command,
                 name=shortcut_name,
                 icon=icon_path,
@@ -559,7 +559,40 @@ def install() -> None:
                 terminal=True,  # Keep terminal for stdout/stderr if needed
                 noexe=True,
             )
-            print(f"Successfully created '{shortcut_name}' in /Applications.")
+            if scut is not None:
+                desktop_dir = getattr(scut, "desktop_dir", None)
+                target = getattr(scut, "target", None)
+                if isinstance(desktop_dir, (str, Path)) and isinstance(
+                    target, (str, Path)
+                ):
+                    src_app = Path(desktop_dir) / target
+                    dest_dir = Path.home() / "Applications"
+                    if src_app.exists():
+                        try:
+                            dest_dir.mkdir(parents=True, exist_ok=True)
+                            dest_app = dest_dir / target
+                            if dest_app.exists():
+                                if dest_app.is_dir():
+                                    shutil.rmtree(dest_app)
+                                else:
+                                    os.remove(dest_app)
+                            shutil.move(str(src_app), str(dest_app))
+                            print(
+                                f"Successfully created '{shortcut_name}' in {dest_app}."
+                            )
+                        except Exception as e:
+                            print(
+                                f"Warning: Failed to move application bundle to {dest_dir}: {e}"
+                            )
+                            print(f"The application bundle remains at {src_app}.")
+                    else:
+                        print(
+                            f"Warning: Expected application bundle at {src_app} was not found."
+                        )
+                else:
+                    print(f"Successfully created '{shortcut_name}' shortcut.")
+            else:
+                print(f"Successfully created '{shortcut_name}' shortcut.")
         else:
             print(f"Shortcut creation is not supported on this OS: {system}")
             return
@@ -586,7 +619,21 @@ def get_installer_version() -> str:
 
         return version("moleditpy-installer")
     except Exception:
-        return "1.4.0"  # Fallback
+        pass
+
+    try:
+        pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        if pyproject_path.exists():
+            with open(pyproject_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith("version"):
+                        parts = line.split("=", 1)
+                        if len(parts) == 2:
+                            return parts[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+
+    return "1.5.0"  # Fallback
 
 
 def main() -> int:

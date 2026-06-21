@@ -223,7 +223,6 @@ class TestFindExecutable:
         """User scheme from sysconfig (nt_user) is searched on Windows."""
         sysconfig_bin = tmp_path / "sysconfig_bin"
         sysconfig_bin.mkdir()
-        _make_fake_exe(sysconfig_bin, "moleditpy")
 
         fake_python_dir = tmp_path / "python_dir"
         fake_python_dir.mkdir()
@@ -239,6 +238,7 @@ class TestFindExecutable:
             mock.patch("shutil.which", return_value=None),
             mock.patch("sysconfig.get_path", return_value=str(sysconfig_bin)),
         ):
+            _make_fake_exe(sysconfig_bin, "moleditpy")
             result = installer_main.find_executable("moleditpy")
 
         assert result is not None
@@ -848,7 +848,19 @@ class TestRemoveShortcut:
 
         assert not desktop.exists()
 
-    def test_removes_app_bundle_on_darwin(self, tmp_path):
+    def test_removes_app_bundle_on_darwin_applications(self, tmp_path):
+        app_bundle = tmp_path / "Applications" / "MoleditPy.app"
+        app_bundle.mkdir(parents=True)
+
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            installer_main.remove_shortcut()
+
+        assert not app_bundle.exists()
+
+    def test_removes_app_bundle_on_darwin_desktop_fallback(self, tmp_path):
         app_bundle = tmp_path / "Desktop" / "MoleditPy.app"
         app_bundle.mkdir(parents=True)
 
@@ -954,6 +966,34 @@ class TestInstall:
         mock_shortcut.assert_called_once()
         _, kwargs = mock_shortcut.call_args
         assert kwargs.get("desktop") is True
+
+    def test_install_darwin_moves_app_to_applications(self, tmp_path):
+        fake_exe = str(tmp_path / "moleditpy")
+        desktop_dir = tmp_path / "Desktop"
+        desktop_dir.mkdir()
+        fake_app = desktop_dir / "MoleditPy.app"
+        fake_app.mkdir()
+
+        from collections import namedtuple
+
+        ShortcutDummy = namedtuple("ShortcutDummy", ["desktop_dir", "target"])
+        dummy_scut = ShortcutDummy(desktop_dir=str(desktop_dir), target="MoleditPy.app")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch(
+                "moleditpy_installer.main.make_shortcut", return_value=dummy_scut
+            ) as mock_shortcut,
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install()
+
+        mock_shortcut.assert_called_once()
+        assert not fake_app.exists()
+        assert (tmp_path / "Applications" / "MoleditPy.app").exists()
 
     def test_install_unsupported_os(self, tmp_path, capsys):
         fake_exe = str(tmp_path / "moleditpy")
@@ -1092,21 +1132,35 @@ class TestMainCLI:
             assert installer_main.get_installer_version() == "2.0.0"
 
         # Test default fallback when package not installed
-        with mock.patch("importlib.metadata.version", side_effect=Exception):
-            assert installer_main.get_installer_version() == "1.4.0"
+        with (
+            mock.patch("importlib.metadata.version", side_effect=Exception),
+            mock.patch("pathlib.Path.exists", return_value=False),
+        ):
+            assert installer_main.get_installer_version() == "1.5.0"
+
+    def test_get_installer_version_from_pyproject(self):
+        # Test reading from pyproject.toml when metadata fails
+        with (
+            mock.patch("importlib.metadata.version", side_effect=Exception),
+            mock.patch("pathlib.Path.exists", return_value=True),
+            mock.patch(
+                "builtins.open", mock.mock_open(read_data='version = "1.5.0"\n')
+            ),
+        ):
+            assert installer_main.get_installer_version() == "1.5.0"
 
     def test_main_version_flag(self, capsys):
         with (
             mock.patch("sys.argv", ["moleditpy-installer", "--version"]),
             mock.patch(
-                "moleditpy_installer.main.get_installer_version", return_value="1.4.0"
+                "moleditpy_installer.main.get_installer_version", return_value="1.5.0"
             ),
         ):
             with pytest.raises(SystemExit) as excinfo:
                 installer_main.main()
         assert excinfo.value.code == 0
         captured = capsys.readouterr()
-        assert "1.4.0" in captured.out or "1.4.0" in captured.err
+        assert "1.5.0" in captured.out or "1.5.0" in captured.err
 
     def test_main_check_flag_success(self, capsys):
         with (
