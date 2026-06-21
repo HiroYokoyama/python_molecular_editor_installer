@@ -1,5 +1,9 @@
 # MoleditPy Installer
 
+[![CI](https://github.com/HiroYokoyama/python_molecular_editor_installer/actions/workflows/ci.yml/badge.svg)](https://github.com/HiroYokoyama/python_molecular_editor_installer/actions/workflows/ci.yml)
+[![PyPI Version](https://img.shields.io/pypi/v/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
+[![Supported Python Versions](https://img.shields.io/pypi/pyversions/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
+
 This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers file associations (Windows only).
 
 ## How to Use
@@ -34,7 +38,22 @@ This package is a helper utility that automatically installs the correct version
     python -m moleditpy_installer --remove
     ```
 
-4.  **Help**
+4.  **Check Executable Location**
+    To search for the `moleditpy` executable in the search paths and print the located path:
+
+    ```bash
+    moleditpy-installer --check
+    ```
+    This command returns exit code `0` if the executable is found, and `1` otherwise.
+
+5.  **Print Version**
+    To show the version of the installer:
+
+    ```bash
+    moleditpy-installer --version
+    ```
+
+6.  **Help**
     To see all available options, run:
 
     ```bash
