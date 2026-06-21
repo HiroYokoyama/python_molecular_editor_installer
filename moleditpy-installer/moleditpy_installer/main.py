@@ -13,6 +13,7 @@ import os
 import platform
 import shutil
 import sys
+import sysconfig
 from pathlib import Path
 from typing import Optional
 
@@ -107,9 +108,19 @@ def find_executable(name: str) -> Optional[str]:
 
     # 4. User-local installation directories (pip install --user)
     if system == "Windows":
-        # %LOCALAPPDATA%\Programs\Python\PythonXY\Scripts  (user-level installer)
+        # Check sysconfig's nt_user scheme first
+        try:
+            nt_user_scripts = Path(sysconfig.get_path("scripts", "nt_user"))
+            found = _check(nt_user_scripts)
+            if found:
+                return found
+        except Exception:
+            pass
+
+        # Check standard user Python installer paths
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
+            # %LOCALAPPDATA%\Programs\Python\PythonXY\Scripts  (user-level installer)
             for scripts_dir in sorted(
                 (Path(local_app_data) / "Programs").glob("Python*/Scripts"),
                 reverse=True,  # prefer the newest Python version
@@ -117,11 +128,103 @@ def find_executable(name: str) -> Optional[str]:
                 found = _check(scripts_dir)
                 if found:
                     return found
+
+            # Microsoft Store Python user packages
+            for scripts_dir in sorted(
+                (Path(local_app_data) / "Packages").glob(
+                    "PythonSoftwareFoundation.Python.*/LocalCache/local-packages/Python*/Scripts"
+                ),
+                reverse=True,  # prefer the newest Python version
+            ):
+                found = _check(scripts_dir)
+                if found:
+                    return found
+
+        # %APPDATA%\Python\PythonXY\Scripts (alternative user-site path)
+        app_data = os.environ.get("APPDATA")
+        if app_data:
+            for scripts_dir in sorted(
+                (Path(app_data) / "Python").glob("Python*/Scripts"),
+                reverse=True,
+            ):
+                found = _check(scripts_dir)
+                if found:
+                    return found
+
+        # Common user-local Conda installations on Windows
+        user_home = Path.home()
+        conda_search_paths = [
+            user_home / "miniconda3" / "Scripts",
+            user_home / "anaconda3" / "Scripts",
+            user_home / "AppData" / "Local" / "miniconda3" / "Scripts",
+            user_home / "AppData" / "Local" / "anaconda3" / "Scripts",
+        ]
+        for path in conda_search_paths:
+            found = _check(path)
+            if found:
+                return found
+
     else:
+        # Check standard user directories via sysconfig schemes (e.g. posix_user, osx_framework_user)
+        for scheme in ("posix_user", "osx_framework_user"):
+            if scheme in sysconfig.get_scheme_names():
+                try:
+                    found = _check(Path(sysconfig.get_path("scripts", scheme)))
+                    if found:
+                        return found
+                except Exception:
+                    pass
+
         # ~/.local/bin is the standard target for `pip install --user` on Linux/macOS
         found = _check(Path.home() / ".local" / "bin")
         if found:
             return found
+
+        # On macOS, user-local binaries might also go to ~/Library/Python/X.Y/bin
+        if system == "Darwin":
+            for scripts_dir in sorted(
+                (Path.home() / "Library" / "Python").glob("*/bin"),
+                reverse=True,  # prefer the newest Python version
+            ):
+                found = _check(scripts_dir)
+                if found:
+                    return found
+
+        # pyenv version binaries (e.g., ~/.pyenv/versions/3.x.x/bin)
+        for scripts_dir in sorted(
+            (Path.home() / ".pyenv" / "versions").glob("*/bin"),
+            reverse=True,
+        ):
+            found = _check(scripts_dir)
+            if found:
+                return found
+
+        # Common user Conda installations and environment folders
+        conda_globs = [
+            (Path.home() / "miniconda3" / "envs").glob("*/bin"),
+            (Path.home() / "anaconda3" / "envs").glob("*/bin"),
+            (Path.home() / ".conda" / "envs").glob("*/bin"),
+        ]
+        for g in conda_globs:
+            for scripts_dir in sorted(g, reverse=True):
+                found = _check(scripts_dir)
+                if found:
+                    return found
+
+        # Other Unix-like package manager and user directories
+        unix_search_paths = [
+            Path.home() / "miniconda3" / "bin",
+            Path.home() / "anaconda3" / "bin",
+            Path.home() / ".linuxbrew" / "bin",
+            Path.home() / ".nix-profile" / "bin",
+            Path.home() / ".guix-profile" / "bin",
+            Path.home() / "bin",
+            Path.home() / ".bin",
+        ]
+        for path in unix_search_paths:
+            found = _check(path)
+            if found:
+                return found
 
     # 5. Fallback: system PATH
     path_from_shutil = shutil.which(name)
