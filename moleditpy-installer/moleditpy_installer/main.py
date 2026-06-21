@@ -639,7 +639,7 @@ def get_installer_version() -> str:
 def main() -> int:
     """Parse CLI arguments and run install or remove."""
     parser = argparse.ArgumentParser(
-        description="Installer for MoleditPy shortcut and file associations."
+        description=f"Installer for MoleditPy shortcut and file associations (v{get_installer_version()})."
     )
     parser.add_argument(
         "--remove",

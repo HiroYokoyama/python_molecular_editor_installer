@@ -1162,6 +1162,19 @@ class TestMainCLI:
         captured = capsys.readouterr()
         assert "1.5.0" in captured.out or "1.5.0" in captured.err
 
+    def test_main_help_flag_prints_version(self, capsys):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--help"]),
+            mock.patch(
+                "moleditpy_installer.main.get_installer_version", return_value="1.5.0"
+            ),
+        ):
+            with pytest.raises(SystemExit) as excinfo:
+                installer_main.main()
+        assert excinfo.value.code == 0
+        captured = capsys.readouterr()
+        assert "1.5.0" in captured.out or "1.5.0" in captured.err
+
     def test_main_check_flag_success(self, capsys):
         with (
             mock.patch("sys.argv", ["moleditpy-installer", "--check"]),
