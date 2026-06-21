@@ -46,6 +46,8 @@ This package is a helper utility that automatically installs the correct version
     ```
     This command returns exit code `0` if the executable is found, and `1` otherwise.
 
+    For the complete list of directories scanned on Windows, macOS, and Linux, see [docs/path.md](docs/path.md).
+
 5.  **Print Version**
     To show the version of the installer:
 
