@@ -184,7 +184,8 @@ def find_executable(name: str) -> Optional[str]:
                 return found
 
     else:
-        # Check standard user directories via sysconfig schemes (e.g. posix_user, osx_framework_user)
+        # Check standard user directories via sysconfig schemes
+        # (e.g. posix_user, osx_framework_user)
         for scheme in ("posix_user", "osx_framework_user"):
             if scheme in sysconfig.get_scheme_names():
                 try:
@@ -227,7 +228,8 @@ def find_executable(name: str) -> Optional[str]:
             if found:
                 return found
 
-        # Mise (formerly RTX) python installations (e.g., ~/.local/share/mise/installs/python/X.Y.Z/bin)
+        # Mise (formerly RTX) python installations
+        # (e.g., ~/.local/share/mise/installs/python/X.Y.Z/bin)
         for scripts_dir in sorted(
             (Path.home() / ".local" / "share" / "mise" / "installs" / "python").glob(
                 "*/bin"
@@ -640,7 +642,10 @@ def main() -> int:
     """Parse CLI arguments and run install or remove."""
     parser = argparse.ArgumentParser(
         prog="moleditpy-installer",
-        description=f"Installer for MoleditPy shortcut and file associations (v{get_installer_version()}).",
+        description=(
+            "Installer for MoleditPy shortcut and file associations "
+            f"(v{get_installer_version()})."
+        ),
     )
     parser.add_argument(
         "--remove",
@@ -664,7 +669,8 @@ def main() -> int:
     if args.remove:
         remove_shortcut()
         return 0
-    elif args.check:
+
+    if args.check:
         command_name = "moleditpy"
         path = find_executable(command_name)
         if not path and platform.system() == "Linux":
@@ -673,14 +679,15 @@ def main() -> int:
         if path:
             print(f"Success: Found executable '{command_name}' at: {path}")
             return 0
-        else:
-            print(
-                f"Error: Executable '{command_name}' (or 'moleditpy-linux') was not found in any search paths."
-            )
-            return 1
-    else:
-        install()
-        return 0
+
+        print(
+            f"Error: Executable '{command_name}' (or 'moleditpy-linux') "
+            "was not found in any search paths."
+        )
+        return 1
+
+    install()
+    return 0
 
 
 if __name__ == "__main__":
