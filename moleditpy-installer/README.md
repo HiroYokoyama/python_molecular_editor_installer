@@ -15,7 +15,7 @@ This package is a helper utility that automatically installs the correct version
     This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
 
 2.  **Create Shortcut**
-    After installation, run the following command in your terminal to create the shortcut in your application menu (e.g., Start Menu on Windows) and register file associations for `.pmeprj` and `.pmeraw` files (Windows only).
+    After installation, run the following command in your terminal to create the shortcut in your application menu (e.g., Start Menu on Windows) and register file associations for `.pmeprj` files (Windows only).
 
     ```bash
     moleditpy-installer

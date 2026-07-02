@@ -280,7 +280,7 @@ def find_executable(name: str) -> Optional[str]:
 
 def register_file_associations_windows(exe_path: str, icon_path: Optional[str]) -> bool:
     """
-    Register file associations for .pmeprj and .pmeraw files on Windows.
+    Register file associations for .pmeprj files on Windows.
 
     Args:
         exe_path (str): Path to the executable to associate.
@@ -293,7 +293,7 @@ def register_file_associations_windows(exe_path: str, icon_path: Optional[str]) 
         return False
 
     try:
-        extensions = [".pmeprj", ".pmeraw"]
+        extensions = [".pmeprj"]
         prog_id = "MoleditPy.File"
         app_name = "MoleditPy"
 
