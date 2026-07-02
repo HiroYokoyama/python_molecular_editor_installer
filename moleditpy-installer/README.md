@@ -17,6 +17,8 @@ This package is a helper utility that automatically installs the correct version
 2.  **Create Shortcut**
     After installation, run the following command in your terminal to create the shortcut in your application menu (e.g., Start Menu on Windows) and register file associations for `.pmeprj` files (Windows only).
 
+    > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
+
     ```bash
     moleditpy-installer
     ```
