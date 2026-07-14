@@ -6,6 +6,8 @@
 
 This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers file associations (Windows and macOS).
 
+![installer](img/installer.png)
+
 ## How to Use
 
 1.  **Install**
