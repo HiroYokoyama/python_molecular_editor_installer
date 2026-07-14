@@ -47,6 +47,7 @@ def get_icon_path() -> Optional[str]:
 
     try:
         import tempfile
+
         ref = importlib.resources.files("moleditpy_installer") / "data" / icon_name
         content = ref.read_bytes()
         tmp_dir = Path(tempfile.gettempdir())
@@ -643,9 +644,11 @@ def install() -> None:
                 mac_target_script = sys.executable
                 mac_target_args = f'"{original_exe_path}"'
 
+            applescript_escaped_args = mac_target_args.replace('"', '\\"')
+
             applescript_code = f"""
 on run
-    do shell script quoted form of "{mac_target_script}" & " {mac_target_args}"
+    do shell script quoted form of "{mac_target_script}" & " {applescript_escaped_args}"
 end run
 
 on open dropped_items
@@ -653,7 +656,7 @@ on open dropped_items
     repeat with dropped_item in dropped_items
         set arg_string to arg_string & " " & quoted form of POSIX path of dropped_item
     end repeat
-    do shell script quoted form of "{mac_target_script}" & " {mac_target_args}" & arg_string
+    do shell script quoted form of "{mac_target_script}" & " {applescript_escaped_args}" & arg_string
 end open
 """
             import subprocess
