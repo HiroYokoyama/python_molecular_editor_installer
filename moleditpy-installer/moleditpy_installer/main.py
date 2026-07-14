@@ -46,18 +46,16 @@ def get_icon_path() -> Optional[str]:
         return None
 
     try:
-        # Check resources
-        # Use files() for Python 3.9+ compatibility (and modern standard)
+        import tempfile
         ref = importlib.resources.files("moleditpy_installer") / "data" / icon_name
-        with importlib.resources.as_file(ref) as path:
-            # Ensure the file actually exists
-            if path.exists():
-                return str(path)
-            print(f"Error: Icon file not found in package resources: {path}")
-            return None
+        content = ref.read_bytes()
+        tmp_dir = Path(tempfile.gettempdir())
+        icon_path = tmp_dir / icon_name
+        icon_path.write_bytes(content)
+        return str(icon_path)
 
-    except OSError as e:
-        print(f"Error finding icon file {icon_name}: {e}")
+    except Exception as e:
+        print(f"Error extracting icon file {icon_name}: {e}")
         return None
 
 
@@ -553,7 +551,7 @@ def install() -> None:
     """
     command_name = "moleditpy"
 
-    # 1. アイコンの取得 (Get Icon)
+    # 1. Get Icon
     icon_path = get_icon_path()
 
     if not icon_path:
@@ -561,7 +559,7 @@ def install() -> None:
             "Warning: Could not find a suitable icon file. A default icon will be used."
         )
 
-    # 2. Conda環境かどうかの判定 (Check for Conda Environment)
+    # 2. Check for Conda Environment
     # CONDA_DEFAULT_ENV: Current environment name (e.g., myenv)
     # CONDA_EXE: Path to conda command
     conda_env = os.environ.get("CONDA_DEFAULT_ENV")
@@ -584,22 +582,22 @@ def install() -> None:
         print("its Scripts/bin directory is accessible.")
         return
 
-    # ショートカット作成用の変数を初期化 (Initialize shortcut variables)
+    # Initialize shortcut variables
     target_script = ""
     target_args = ""
 
-    # Conda環境、かつ base 環境以外の場合 (If Conda environment and not base)
-    if conda_env and conda_exe and conda_env != "base":
+    # If Conda environment
+    if conda_env and conda_exe:
         print(f"Conda environment detected: {conda_env}")
 
-        # ターゲットをアプリ本体ではなく 'conda.exe' にする (Target conda.exe instead of app)
+        # Target conda.exe instead of app
         target_script = conda_exe
 
-        # コマンド組立: conda run -n myenv "C:\Path\To\moleditpy.exe"
+        # Command assembly: conda run -n myenv "C:\Path\To\moleditpy.exe"
         target_args = f'run -n {conda_env} "{original_exe_path}"'
 
     else:
-        # 通常の環境 (pip installなど) (Normal environment)
+        # Normal environment (pip install, etc.)
         target_script = original_exe_path
         target_args = ""  # No arguments
 
@@ -638,9 +636,16 @@ def install() -> None:
             target_app_name = f"{shortcut_name}.app"
             target_app_path = desktop_dir / target_app_name
 
+            # Ensure proper execution path
+            mac_target_script = target_script
+            mac_target_args = target_args
+            if target_script == original_exe_path:
+                mac_target_script = sys.executable
+                mac_target_args = f'"{original_exe_path}"'
+
             applescript_code = f"""
 on run
-    do shell script quoted form of "{target_script}" & " {target_args}"
+    do shell script quoted form of "{mac_target_script}" & " {mac_target_args}"
 end run
 
 on open dropped_items
@@ -648,7 +653,7 @@ on open dropped_items
     repeat with dropped_item in dropped_items
         set arg_string to arg_string & " " & quoted form of POSIX path of dropped_item
     end repeat
-    do shell script quoted form of "{target_script}" & " {target_args}" & arg_string
+    do shell script quoted form of "{mac_target_script}" & " {mac_target_args}" & arg_string
 end open
 """
             import subprocess
