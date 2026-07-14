@@ -136,16 +136,20 @@ jobs:
         with:
           packages-dir: dist
 
+      - name: Set APP_VERSION
+        id: set_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "APP_VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+          fi
+
       - name: Detect Pre-release
         id: prerelease_check
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          
-          if echo "$VERSION" | grep -qE '[a-zA-Z]'; then
+          if echo "$APP_VERSION" | grep -qE '[a-zA-Z]'; then
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
           else
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
