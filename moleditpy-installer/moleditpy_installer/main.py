@@ -374,6 +374,17 @@ def register_file_associations_darwin(app_path: Path) -> bool:
         return False
 
     try:
+        # Dedicated document icon (the macOS counterpart of Windows'
+        # DefaultIcon registry value). Falls back to the app icon if the
+        # file icon cannot be extracted.
+        doc_icon_name = "applet.icns"
+        file_icon_path = _extract_data_file("file_icon.icns")
+        if file_icon_path:
+            resources_dir = app_path / "Contents" / "Resources"
+            resources_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(file_icon_path, resources_dir / "file_icon.icns")
+            doc_icon_name = "file_icon.icns"
+
         with open(plist_path, "rb") as fp:
             pl = plistlib.load(fp)
 
@@ -394,7 +405,7 @@ def register_file_associations_darwin(app_path: Path) -> bool:
                 "CFBundleTypeRole": "Editor",
                 "LSHandlerRank": "Owner",
                 "LSItemContentTypes": ["com.moleditpy.pmeprj"],
-                "CFBundleTypeIconFile": "applet.icns",
+                "CFBundleTypeIconFile": doc_icon_name,
             }
             doc_types.append(new_doc_type)
             pl["CFBundleDocumentTypes"] = doc_types
@@ -411,6 +422,7 @@ def register_file_associations_darwin(app_path: Path) -> bool:
                         "UTTypeIdentifier": "com.moleditpy.pmeprj",
                         "UTTypeDescription": "MoleditPy Project File",
                         "UTTypeConformsTo": ["public.data"],
+                        "UTTypeIconFile": doc_icon_name,
                         "UTTypeTagSpecification": {
                             "public.filename-extension": ["pmeprj"],
                         },
@@ -849,10 +861,23 @@ on open dropped_items
 end open
 """
             try:
+                # Remove any stale bundle first: osacompile -o into an
+                # existing .app keeps leftover files (old icons, Assets.car).
+                if target_app_path.exists():
+                    shutil.rmtree(target_app_path)
+
                 subprocess.run(
                     ["osacompile", "-o", str(target_app_path), "-e", applescript_code],
                     check=True,
                 )
+
+                # Modern osacompile applets ship a compiled asset catalog
+                # (Assets.car) + CFBundleIconName; macOS prefers that over
+                # CFBundleIconFile, so a replaced applet.icns is IGNORED
+                # unless both are removed.
+                assets_car = target_app_path / "Contents" / "Resources" / "Assets.car"
+                if assets_car.exists():
+                    assets_car.unlink()
 
                 # Give the bundle a stable identity: Launch Services needs a
                 # bundle identifier to bind document types (and the icon)
@@ -861,9 +886,15 @@ end open
                 if plist_path.exists():
                     with open(plist_path, "rb") as fp:
                         pl = plistlib.load(fp)
+                    pl.pop("CFBundleIconName", None)  # would win over IconFile
                     pl["CFBundleIdentifier"] = "com.moleditpy.launcher"
                     pl["CFBundleName"] = shortcut_name
                     pl["CFBundleDisplayName"] = shortcut_name
+                    # Bump per install so Launch Services/Finder drop their
+                    # cached (old) icon for the bundle identifier.
+                    installer_version = get_installer_version()
+                    pl["CFBundleShortVersionString"] = installer_version
+                    pl["CFBundleVersion"] = installer_version
                     # Shown in the one-time macOS consent prompt when the
                     # launcher first opens Terminal via Apple events.
                     pl["NSAppleEventsUsageDescription"] = (

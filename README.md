@@ -77,7 +77,7 @@ This package is a helper utility that automatically installs the correct version
 - A `MoleditPy.app` launcher in `~/Applications` and on the Desktop, with the MoleditPy icon.
 - The launcher pairs the `moleditpy` script with the Python interpreter of **its own environment** (detected from the adjacent interpreter or the script's shebang), so it keeps working even when the installer runs from a different environment.
 - MoleditPy always opens inside a **Terminal window**, so Python output and any errors stay visible. The first launch shows a one-time macOS consent prompt ("MoleditPy wants access to control Terminal") — click OK.
-- Double-clicking `.pmeprj` files opens MoleditPy: the app bundle declares the `com.moleditpy.pmeprj` document type (exported UTI) and is registered with Launch Services.
+- Double-clicking `.pmeprj` files opens MoleditPy: the app bundle declares the `com.moleditpy.pmeprj` document type (exported UTI) and is registered with Launch Services. `.pmeprj` documents get their own file icon, matching the Windows behavior.
 - The bundle is ad-hoc code-signed after configuration; required on Apple Silicon.
 
 ### Linux

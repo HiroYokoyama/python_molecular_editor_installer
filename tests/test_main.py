@@ -746,6 +746,18 @@ class TestRegisterFileAssociationsWindows:
 
 
 class TestRegisterFileAssociationsDarwin:
+    @pytest.fixture(autouse=True)
+    def _isolate_persistent_dir(self, tmp_path):
+        """The function extracts file_icon.icns — keep the tests away
+        from the real per-user persistent dir."""
+        with mock.patch.object(
+            installer_main,
+            "get_persistent_data_dir",
+            return_value=tmp_path / "persistent",
+        ):
+            (tmp_path / "persistent").mkdir(exist_ok=True)
+            yield
+
     def test_returns_false_on_non_darwin(self, tmp_path):
         with mock.patch("platform.system", return_value="Linux"):
             assert installer_main.register_file_associations_darwin(tmp_path) is False
@@ -927,6 +939,7 @@ class TestRemoveShortcut:
             "get_persistent_data_dir",
             return_value=tmp_path / "persistent",
         ):
+            (tmp_path / "persistent").mkdir(exist_ok=True)
             yield
 
     def test_removes_lnk_on_windows(self, tmp_path):
@@ -1003,8 +1016,7 @@ class TestRemoveShortcut:
         mock_ls.assert_called_once_with(app_bundle, unregister=True)
 
     def test_remove_cleans_persistent_icon_dir(self, tmp_path):
-        persistent = tmp_path / "persistent"
-        persistent.mkdir()
+        persistent = tmp_path / "persistent"  # created by the autouse fixture
         (persistent / "icon.ico").write_bytes(b"x")
 
         with (
@@ -1629,6 +1641,16 @@ class TestRefreshLaunchServices:
 
 
 class TestDarwinUTIDeclaration:
+    @pytest.fixture(autouse=True)
+    def _isolate_persistent_dir(self, tmp_path):
+        with mock.patch.object(
+            installer_main,
+            "get_persistent_data_dir",
+            return_value=tmp_path / "persistent",
+        ):
+            (tmp_path / "persistent").mkdir(exist_ok=True)
+            yield
+
     def test_exports_pmeprj_uti(self, tmp_path):
         import plistlib
 
@@ -1761,3 +1783,137 @@ class TestCheckLaunchVerification:
     def test_check_fails_when_not_launchable(self, capsys):
         assert self._run_check(False) == 1
         assert "Launch check: FAILED" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# macOS document icon + app icon override fixes
+# ---------------------------------------------------------------------------
+
+
+class TestDarwinDocumentIcon:
+    @pytest.fixture(autouse=True)
+    def _isolate_persistent_dir(self, tmp_path):
+        with mock.patch.object(
+            installer_main,
+            "get_persistent_data_dir",
+            return_value=tmp_path / "persistent",
+        ):
+            (tmp_path / "persistent").mkdir(exist_ok=True)
+            yield
+
+    def test_file_icon_copied_and_referenced(self, tmp_path):
+        """.pmeprj documents get their own icon (macOS counterpart of the
+        Windows DefaultIcon registry value)."""
+        import plistlib
+
+        app_path = tmp_path / "MoleditPy.app"
+        contents_path = app_path / "Contents"
+        contents_path.mkdir(parents=True)
+        with open(contents_path / "Info.plist", "wb") as fp:
+            plistlib.dump({"CFBundleIdentifier": "com.moleditpy.launcher"}, fp)
+
+        with mock.patch("platform.system", return_value="Darwin"):
+            assert installer_main.register_file_associations_darwin(app_path) is True
+
+        assert (contents_path / "Resources" / "file_icon.icns").exists()
+        with open(contents_path / "Info.plist", "rb") as fp:
+            pl = plistlib.load(fp)
+        assert pl["CFBundleDocumentTypes"][0]["CFBundleTypeIconFile"] == (
+            "file_icon.icns"
+        )
+        assert pl["UTExportedTypeDeclarations"][0]["UTTypeIconFile"] == (
+            "file_icon.icns"
+        )
+
+    def test_falls_back_to_app_icon_when_extraction_fails(self, tmp_path):
+        import plistlib
+
+        app_path = tmp_path / "MoleditPy.app"
+        contents_path = app_path / "Contents"
+        contents_path.mkdir(parents=True)
+        with open(contents_path / "Info.plist", "wb") as fp:
+            plistlib.dump({}, fp)
+
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch.object(installer_main, "_extract_data_file", return_value=None),
+        ):
+            assert installer_main.register_file_associations_darwin(app_path) is True
+
+        with open(contents_path / "Info.plist", "rb") as fp:
+            pl = plistlib.load(fp)
+        assert pl["CFBundleDocumentTypes"][0]["CFBundleTypeIconFile"] == "applet.icns"
+
+    def test_packaged_file_icon_icns_is_valid(self):
+        """The shipped file_icon.icns must be a real ICNS file."""
+        import importlib.resources
+
+        ref = (
+            importlib.resources.files("moleditpy_installer") / "data" / "file_icon.icns"
+        )
+        header = ref.read_bytes()[:4]
+        assert header == b"icns"
+
+
+class TestDarwinAppIconOverride:
+    def _install_with_fake_osacompile(self, tmp_path):
+        import plistlib
+
+        def fake_osacompile(cmd, **kwargs):
+            app = Path(cmd[2])
+            resources = app / "Contents" / "Resources"
+            resources.mkdir(parents=True, exist_ok=False)
+            # what modern osacompile actually produces
+            (resources / "Assets.car").write_bytes(b"car")
+            with open(app / "Contents" / "Info.plist", "wb") as fp:
+                plistlib.dump({"CFBundleIconName": "applet"}, fp)
+
+        with (
+            mock.patch.object(
+                installer_main, "find_executable", return_value=str(tmp_path / "m")
+            ),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=sys.executable
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=True
+            ),
+            mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(installer_main, "codesign_app"),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("subprocess.run", side_effect=fake_osacompile),
+            mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            assert installer_main.install() == 0
+
+        return tmp_path / "Desktop" / "MoleditPy.app"
+
+    def test_assets_car_and_iconname_removed(self, tmp_path):
+        """Assets.car / CFBundleIconName would override applet.icns, so the
+        custom icon was silently ignored — both must be stripped."""
+        import plistlib
+
+        app = self._install_with_fake_osacompile(tmp_path)
+
+        assert not (app / "Contents" / "Resources" / "Assets.car").exists()
+        with open(app / "Contents" / "Info.plist", "rb") as fp:
+            pl = plistlib.load(fp)
+        assert "CFBundleIconName" not in pl
+        assert pl["CFBundleIdentifier"] == "com.moleditpy.launcher"
+        # Version stamped so Launch Services drops its cached icon
+        assert pl["CFBundleVersion"] == installer_main.get_installer_version()
+
+    def test_stale_desktop_bundle_replaced(self, tmp_path):
+        """osacompile -o into an existing .app keeps leftovers — the old
+        bundle must be removed first (fake osacompile uses exist_ok=False,
+        so this would raise if it were not)."""
+        stale = tmp_path / "Desktop" / "MoleditPy.app" / "Contents"
+        stale.mkdir(parents=True)
+        (stale / "stale-marker").write_bytes(b"old")
+
+        app = self._install_with_fake_osacompile(tmp_path)
+
+        assert not (app / "Contents" / "stale-marker").exists()
