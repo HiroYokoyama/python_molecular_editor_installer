@@ -1122,8 +1122,8 @@ class TestInstall:
         assert "conda" in script_arg.lower()
         assert "myenv" in script_arg
 
-    def test_install_skips_conda_for_base_env(self, tmp_path):
-        """CONDA_DEFAULT_ENV=base should be treated like no conda env."""
+    def test_install_uses_conda_for_base_env(self, tmp_path):
+        """CONDA_DEFAULT_ENV=base should use conda run to ensure proper PATH."""
         fake_exe = str(tmp_path / "moleditpy.exe")
         fake_conda = str(tmp_path / "conda.exe")
 
@@ -1145,8 +1145,8 @@ class TestInstall:
         script_arg = (
             mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
         )
-        # base env → target is the app exe directly, not the conda wrapper
-        assert script_arg == fake_exe
+        assert fake_conda in script_arg
+        assert "run -n base" in script_arg
 
     def test_install_falls_back_to_moleditpy_linux(self, tmp_path):
         """On Linux, if 'moleditpy' is not found, 'moleditpy-linux' is tried."""
