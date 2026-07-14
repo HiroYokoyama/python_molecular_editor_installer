@@ -633,65 +633,67 @@ def install() -> None:
             )
 
         elif system == "Darwin":
-            print("macOS detected. Creating application shortcut...")
-            scut = make_shortcut(
-                script=full_command,
-                name=shortcut_name,
-                icon=icon_path,
-                desktop=True,
-                terminal=True,  # Keep terminal for stdout/stderr if needed
-                noexe=True,
-            )
+            print("macOS detected. Creating application shortcut natively...")
+            desktop_dir = Path.home() / "Desktop"
+            target_app_name = f"{shortcut_name}.app"
+            target_app_path = desktop_dir / target_app_name
 
-            if scut is not None:
-                desktop_dir = getattr(scut, "desktop_dir", None)
-                target = getattr(scut, "target", None)
-                if isinstance(desktop_dir, (str, Path)) and isinstance(
-                    target, (str, Path)
-                ):
-                    src_app = Path(desktop_dir) / target
-                    dest_dir = Path.home() / "Applications"
+            applescript_code = f"""
+on run
+    do shell script quoted form of "{target_script}" & " {target_args}"
+end run
 
-                    if src_app.exists():
-                        register_file_associations_darwin(src_app)
-                        try:
-                            dest_dir.mkdir(parents=True, exist_ok=True)
-                            dest_app = dest_dir / target
-                            if dest_app.exists():
-                                if dest_app.is_dir():
-                                    shutil.rmtree(dest_app)
-                                else:
-                                    os.remove(dest_app)
+on open dropped_items
+    set arg_string to ""
+    repeat with dropped_item in dropped_items
+        set arg_string to arg_string & " " & quoted form of POSIX path of dropped_item
+    end repeat
+    do shell script quoted form of "{target_script}" & " {target_args}" & arg_string
+end open
+"""
+            import subprocess
 
-                            shutil.copytree(str(src_app), str(dest_app))
+            try:
+                subprocess.run(
+                    ["osacompile", "-o", str(target_app_path), "-e", applescript_code],
+                    check=True,
+                )
 
-                            print("Created shortcut on ~/Applications and Desktop.")
-                            print(
-                                "If you want to add to /Applications folder, please move the desktop one."
-                            )
-                        except Exception as e:
-                            print(
-                                f"Warning: Failed to copy application bundle to {dest_dir}: {e}"
-                            )
-                            print("Created shortcut on Desktop.")
-                            print(
-                                "If you want to add to /Applications folder, please move the desktop one."
-                            )
+                if icon_path and os.path.exists(icon_path):
+                    app_resources = target_app_path / "Contents" / "Resources"
+                    app_resources.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(icon_path, app_resources / "applet.icns")
+
+                    plist_path = target_app_path / "Contents" / "Info.plist"
+                    if plist_path.exists():
+                        import plistlib
+
+                        with open(plist_path, "rb") as fp:
+                            pl = plistlib.load(fp)
+                        pl["CFBundleIconFile"] = "applet.icns"
+                        with open(plist_path, "wb") as fp:
+                            plistlib.dump(pl, fp)
+
+                register_file_associations_darwin(target_app_path)
+
+                dest_dir = Path.home() / "Applications"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_app = dest_dir / target_app_name
+                if dest_app.exists():
+                    if dest_app.is_dir():
+                        shutil.rmtree(dest_app)
                     else:
-                        print("Created shortcut on Desktop.")
-                        print(
-                            "If you want to add to /Applications folder, please move the desktop one."
-                        )
-                else:
-                    print("Created shortcut on Desktop.")
-                    print(
-                        "If you want to add to /Applications folder, please move the desktop one."
-                    )
-            else:
-                print("Created shortcut on Desktop.")
+                        os.remove(dest_app)
+
+                shutil.copytree(str(target_app_path), str(dest_app))
+
+                print("Created shortcut on ~/Applications and Desktop.")
                 print(
                     "If you want to add to /Applications folder, please move the desktop one."
                 )
+            except Exception as e:
+                print(f"Failed to create macOS app bundle natively: {e}")
+                print("Created shortcut on Desktop.")
         else:
             print(f"Shortcut creation is not supported on this OS: {system}")
             return
