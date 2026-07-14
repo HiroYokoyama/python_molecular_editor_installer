@@ -86,19 +86,19 @@ This package is a helper utility that automatically installs the correct version
 ## What the installer sets up
 
 ### Windows
-- Start Menu and Desktop shortcuts (icon included).
+- Start Menu shortcut (icon included); Desktop shortcut when enabled (`--desktop` or the TUI checkbox).
 - `.pmeprj` files open MoleditPy on double-click (per-user registry, no admin rights needed).
 - Icons are stored under `%LOCALAPPDATA%\MoleditPy\installer` so they survive temp-folder cleanup.
 
 ### macOS
-- A `MoleditPy.app` launcher in `~/Applications` and on the Desktop, with the MoleditPy icon.
+- A `MoleditPy.app` launcher in `~/Applications` (or `/Applications` with `--system`), plus a Desktop copy when enabled, with the MoleditPy icon.
 - The launcher pairs the `moleditpy` script with the Python interpreter of **its own environment** (detected from the adjacent interpreter or the script's shebang), so it keeps working even when the installer runs from a different environment.
 - MoleditPy always opens inside a **Terminal window**, so Python output and any errors stay visible. The first launch shows a one-time macOS consent prompt ("MoleditPy wants access to control Terminal") — click OK.
 - Double-clicking `.pmeprj` files opens MoleditPy: the app bundle declares the `com.moleditpy.pmeprj` document type (exported UTI) and is registered with Launch Services. `.pmeprj` documents get their own file icon, matching the Windows behavior.
 - The bundle is ad-hoc code-signed after configuration; required on Apple Silicon.
 
 ### Linux
-- Application-menu and Desktop `.desktop` entries (icon included), launched in a terminal so output stays visible (matching macOS).
+- Application-menu `.desktop` entry (icon included; Desktop copy when enabled), launched in a terminal so output stays visible (matching macOS). With `--system` the entry goes to `/usr/share/applications`.
 - `.pmeprj` files open MoleditPy on double-click: a per-user `application/x-moleditpy-project` MIME type is registered (freedesktop shared-mime-info, no root needed) and set as the default handler.
 - `.pmeprj` documents get their own file icon in file managers, matching Windows and macOS.
 
