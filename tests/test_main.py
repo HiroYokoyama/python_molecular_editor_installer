@@ -1728,3 +1728,36 @@ class TestCodesignApp:
         assert len(signed) == 2
         assert str(tmp_path / "Desktop" / "MoleditPy.app") in signed
         assert str(tmp_path / "Applications" / "MoleditPy.app") in signed
+
+
+# ---------------------------------------------------------------------------
+# --check launch verification (macOS)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckLaunchVerification:
+    def _run_check(self, verify_ok):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--check"]),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch.object(
+                installer_main, "find_executable", return_value="/env/bin/moleditpy"
+            ),
+            mock.patch.object(
+                installer_main,
+                "python_for_executable",
+                return_value="/env/bin/python3",
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=verify_ok
+            ),
+        ):
+            return installer_main.main()
+
+    def test_check_passes_when_launchable(self, capsys):
+        assert self._run_check(True) == 0
+        assert "Launch check: OK" in capsys.readouterr().out
+
+    def test_check_fails_when_not_launchable(self, capsys):
+        assert self._run_check(False) == 1
+        assert "Launch check: FAILED" in capsys.readouterr().out

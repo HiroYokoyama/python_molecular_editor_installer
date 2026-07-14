@@ -700,6 +700,9 @@ def install() -> int:
     Creates a shortcut for the installed moleditpy executable.
     Handles Conda environments by using 'conda run'.
 
+    On macOS the launcher always opens MoleditPy inside a Terminal window,
+    so Python output and errors stay visible.
+
     Returns:
         int: 0 on success, 1 on failure.
     """
@@ -820,10 +823,10 @@ def install() -> int:
             applescript_escaped_args = f'"{original_exe_path}"'.replace('"', '\\"')
 
             # Run MoleditPy inside a Terminal window so Python output and
-            # errors are visible to the user (a silent GUI launch hides
-            # failures like a broken environment completely). "do script"
-            # returns immediately, so the applet quits right away instead of
-            # staying "running" in the Dock for the whole session.
+            # errors are always visible to the user (a silent GUI launch
+            # hides failures like a broken environment completely).
+            # "do script" returns immediately, so the applet quits right
+            # away instead of staying "running" in the Dock.
             applescript_code = f"""
 on launch_moleditpy(extra_args)
     set base_cmd to quoted form of "{mac_escaped_script}" & " {applescript_escaped_args}"
@@ -996,6 +999,21 @@ def main() -> int:
             path = find_executable(command_name)
         if path:
             print(f"Success: Found executable '{command_name}' at: {path}")
+
+            # On macOS the shortcut pairs the script with its environment's
+            # interpreter — verify that pairing actually launches.
+            if platform.system() == "Darwin":
+                interpreter = python_for_executable(path)
+                print(f"Launcher interpreter: {interpreter}")
+                if verify_launch_command(interpreter, path):
+                    print("Launch check: OK")
+                else:
+                    print(
+                        "Launch check: FAILED — this pairing cannot start "
+                        "MoleditPy. Re-run from the Python environment where "
+                        "moleditpy is installed."
+                    )
+                    return 1
             return 0
 
         print(
