@@ -2413,6 +2413,8 @@ class TestTui:
                             break
             assert mock_install.called
             assert mock_install.call_args.args[0] == installer_main.InstallOptions()
+            # success auto-exits the TUI
+            assert app.return_value == 0
 
         asyncio.run(check())
 
@@ -2724,6 +2726,36 @@ class TestTuiActions:
         writer.flush()
         assert app.lines == ["hello", "world", "tail"]
 
+    def test_mouse_click_reaches_buttons_at_80x24(self):
+        """Regression: on a standard 80x24 terminal the buttons were pushed
+        below the fold by the tall layout, so mouse clicks never reached
+        them (only the key bindings worked)."""
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            with mock.patch.object(
+                installer_main, "install", return_value=0
+            ) as mock_install:
+                async with app.run_test(size=(80, 24)) as pilot:
+                    await pilot.pause()
+                    button = app.query_one("#install")
+                    # the whole button must be inside the visible screen
+                    assert button.region.y + button.region.height <= 24, (
+                        f"Install button out of view: {button.region}"
+                    )
+                    clicked = await pilot.click("#install")
+                    assert clicked
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if mock_install.called:
+                            break
+            assert mock_install.called
+
+        asyncio.run(check())
+
     def test_run_tui_returns_int(self):
         from moleditpy_installer import tui
 
@@ -2731,3 +2763,71 @@ class TestTuiActions:
             assert tui.run_tui() == 0
         with mock.patch.object(tui.InstallerApp, "run", return_value=3):
             assert tui.run_tui() == 3
+
+    def test_run_tui_replays_log_to_terminal(self, capsys):
+        from moleditpy_installer import tui
+
+        def fake_run(self):
+            self._history.extend(["line one", "line two"])
+            return 0
+
+        with mock.patch.object(tui.InstallerApp, "run", fake_run):
+            assert tui.run_tui() == 0
+
+        out = capsys.readouterr().out
+        assert "MoleditPy installer log:" in out
+        assert "line one" in out
+        assert "line two" in out
+        assert "Result: success" in out
+
+    def test_run_tui_prints_failure_result(self, capsys):
+        from moleditpy_installer import tui
+
+        with mock.patch.object(tui.InstallerApp, "run", return_value=1):
+            assert tui.run_tui() == 1
+        assert "FAILED (exit code 1)" in capsys.readouterr().out
+
+    def test_status_bar_visible_and_updated(self):
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test() as pilot:
+                from textual.widgets import Static
+
+                status = app.query_one("#status", Static)
+                assert status.display  # the bar is shown
+                # detection worker fills it in
+                for _ in range(100):
+                    await pilot.pause(0.05)
+                    if "moleditpy" in str(status.render()):
+                        break
+                assert "moleditpy" in str(status.render())
+
+        asyncio.run(check())
+
+    def test_failure_keeps_tui_open_for_retry(self):
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            with mock.patch.object(installer_main, "install", return_value=1):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from textual.widgets import Button
+
+                    app.query_one("#install", Button).press()
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if app.exit_code == 1:
+                            break
+                    await pilot.pause()
+                    # app did NOT exit; buttons re-enabled for a retry
+                    assert app.return_value is None
+                    assert app.query_one("#install", Button).disabled is False
+
+        asyncio.run(check())

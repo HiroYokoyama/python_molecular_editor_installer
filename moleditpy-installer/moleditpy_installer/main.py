@@ -8,7 +8,9 @@ associations on Windows. It is designed to be run after installing the
 """
 
 import argparse
+import contextlib
 import importlib.resources
+import io
 import os
 import platform
 import plistlib
@@ -26,7 +28,10 @@ try:
 except ImportError:
     winreg = None
 
-from pyshortcuts import make_shortcut
+# pyshortcuts prints conda diagnostics ("No conda env active, ...") at
+# import time; keep that noise out of every CLI/TUI invocation.
+with contextlib.redirect_stdout(io.StringIO()):
+    from pyshortcuts import make_shortcut
 
 # System-wide conda locations on Linux/macOS (home-dir installs are handled
 # separately). /opt/miniconda3 is the macOS pkg-installer default; /opt/conda

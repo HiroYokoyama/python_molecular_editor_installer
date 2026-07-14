@@ -52,29 +52,33 @@ class InstallerApp(App):
     TITLE = "MoleditPy Installer"
     SUB_TITLE = f"v{installer.get_installer_version()}"
 
+    # Compact layout: everything (including the buttons) must fit in a
+    # standard 80x24 terminal — on smaller screens the buttons were pushed
+    # below the fold and mouse clicks could not reach them. overflow-y
+    # keeps the screen scrollable as a safety net on tiny terminals.
     CSS = """
     Screen {
         layout: vertical;
+        overflow-y: auto;
     }
     #options {
         height: auto;
         border: round $primary;
-        padding: 0 2;
-        margin: 1 2 0 2;
+        padding: 0 1;
+        margin: 0 2;
     }
     #options Label {
-        margin-top: 1;
         text-style: bold;
         color: $text;
     }
     #scope {
         height: auto;
-        margin-top: 1;
+        border: none;
+        padding: 0;
     }
     #buttons {
         height: auto;
         align-horizontal: center;
-        margin: 1 0;
     }
     #buttons Button {
         margin: 0 2;
@@ -82,12 +86,16 @@ class InstallerApp(App):
     }
     #log {
         border: round $secondary;
-        margin: 0 2 1 2;
+        margin: 0 2;
         height: 1fr;
+        min-height: 3;
     }
     #status {
-        margin: 0 3;
-        color: $text-muted;
+        height: 1;
+        margin: 0 2;
+        padding: 0 1;
+        background: $boost;
+        color: $text;
     }
     """
 
@@ -96,6 +104,11 @@ class InstallerApp(App):
         ("r", "remove", "Remove"),
         ("q", "quit", "Quit"),
     ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.exit_code = 0
+        self._history = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -116,12 +129,11 @@ class InstallerApp(App):
             yield Button("Install", variant="success", id="install")
             yield Button("Remove", variant="error", id="remove")
             yield Button("Quit", variant="default", id="quit")
-        yield Static("", id="status")
+        yield Static("Status: detecting moleditpy executable…", id="status")
         yield RichLog(id="log", wrap=True, markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.exit_code = 0
         self.log_line("Welcome! Pick components, then press Install.")
         if platform.system() == "Windows":
             self.log_line("Note: system-wide scope is not available on Windows.")
@@ -132,6 +144,7 @@ class InstallerApp(App):
     # ------------------------------------------------------------------ #
 
     def log_line(self, line: str) -> None:
+        self._history.append(line)
         self.query_one("#log", RichLog).write(line)
 
     def _set_status(self, text: str) -> None:
@@ -172,13 +185,19 @@ class InstallerApp(App):
             result = 1
         writer.flush()
         ok = not result  # None (remove) or 0 (install) mean success
-        self.call_from_thread(
-            self.log_line,
-            f"--- {description} {'finished' if ok else 'FAILED'} ---",
-        )
-        # Quit propagates the last action's outcome as the exit code
-        self.call_from_thread(setattr, self, "exit_code", 0 if ok else 1)
-        self.call_from_thread(self._set_busy, False)
+        self.call_from_thread(self._finish_action, description, ok)
+
+    def _finish_action(self, description: str, ok: bool) -> None:
+        self.log_line(f"--- {description} {'finished' if ok else 'FAILED'} ---")
+        self.exit_code = 0 if ok else 1
+        if ok:
+            # Exit on completion; run_tui() replays the log in the terminal.
+            self._set_status(f"{description} finished — exiting…")
+            self.exit(self.exit_code)
+        else:
+            # Stay open so the options can be adjusted and retried.
+            self._set_status(f"{description} FAILED — see the log, adjust and retry.")
+            self._set_busy(False)
 
     # ------------------------------------------------------------------ #
     # actions
@@ -195,6 +214,7 @@ class InstallerApp(App):
             f"file association={'yes' if options.file_assoc else 'no'}, "
             f"scope={'system' if options.system else 'user'}"
         )
+        self._set_status("Installing…")
         self.run_worker(
             lambda: self._run_installer_action(
                 lambda: installer.install(options), "Install"
@@ -210,6 +230,7 @@ class InstallerApp(App):
             f"Removing shortcuts and file associations "
             f"(scope={'system' if system_scope else 'user'})..."
         )
+        self._set_status("Removing…")
         self.run_worker(
             lambda: self._run_installer_action(
                 lambda: installer.remove_shortcut(system_scope=system_scope), "Remove"
@@ -227,7 +248,19 @@ class InstallerApp(App):
 
 
 def run_tui() -> int:
-    """Run the installer TUI; returns a process exit code."""
+    """Run the installer TUI; returns a process exit code.
+
+    After the TUI closes (auto-exit on success or manual quit), the full
+    session log is replayed to the terminal so the results stay visible.
+    """
     app = InstallerApp()
     result = app.run()
-    return result if isinstance(result, int) else 0
+    code = result if isinstance(result, int) else 0
+
+    history = getattr(app, "_history", [])
+    if history:
+        print("MoleditPy installer log:")
+        for line in history:
+            print(f"  {line}")
+    print(f"Result: {'success' if code == 0 else f'FAILED (exit code {code})'}")
+    return code
