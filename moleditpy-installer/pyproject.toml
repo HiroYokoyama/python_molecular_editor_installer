@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-installer"
-version = "1.7.0"
+version = "1.8.0"
 authors = [
   { name="HiroYokoyama", email="titech.yoko.hiro@gmail.com" },
 ]
-description = "Installer and shortcut creator for moleditpy (OS-dependent)"
+description = "Installer and application bundler for MoleditPy"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.9"

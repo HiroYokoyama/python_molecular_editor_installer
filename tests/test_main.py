@@ -1037,48 +1037,49 @@ class TestInstall:
         assert kwargs.get("startmenu") is True
         assert kwargs.get("desktop") is True
 
-    def test_install_calls_make_shortcut_on_darwin(self, tmp_path):
+    def test_install_calls_osacompile_on_darwin(self, tmp_path):
         fake_exe = str(tmp_path / "moleditpy")
 
         with (
             mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
             mock.patch.object(installer_main, "get_icon_path", return_value=None),
             mock.patch("platform.system", return_value="Darwin"),
-            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
-            mock.patch.dict(os.environ, {}, clear=True),
-        ):
-            installer_main.install()
-
-        mock_shortcut.assert_called_once()
-        _, kwargs = mock_shortcut.call_args
-        assert kwargs.get("desktop") is True
-
-    def test_install_darwin_copies_app_to_applications(self, tmp_path):
-        fake_exe = str(tmp_path / "moleditpy")
-        desktop_dir = tmp_path / "Desktop"
-        desktop_dir.mkdir()
-        fake_app = desktop_dir / "MoleditPy.app"
-        fake_app.mkdir()
-
-        from collections import namedtuple
-
-        ShortcutDummy = namedtuple("ShortcutDummy", ["desktop_dir", "target"])
-        dummy_scut = ShortcutDummy(desktop_dir=str(desktop_dir), target="MoleditPy.app")
-
-        with (
-            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
-            mock.patch.object(installer_main, "get_icon_path", return_value=None),
-            mock.patch("platform.system", return_value="Darwin"),
-            mock.patch(
-                "moleditpy_installer.main.make_shortcut", return_value=dummy_scut
-            ) as mock_shortcut,
+            mock.patch("subprocess.run") as mock_run,
+            mock.patch("shutil.copytree"),
+            mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
             mock.patch("pathlib.Path.home", return_value=tmp_path),
             mock.patch.dict(os.environ, {}, clear=True),
         ):
             installer_main.install()
 
-        mock_shortcut.assert_called_once()
-        assert fake_app.exists()
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert args[0] == "osacompile"
+        assert "-e" in args
+        # Check that the AppleScript includes the "on open" handler
+        applescript_idx = args.index("-e") + 1
+        assert "on open dropped_items" in args[applescript_idx]
+
+    def test_install_darwin_copies_app_to_applications(self, tmp_path):
+        fake_exe = str(tmp_path / "moleditpy")
+        
+        def mock_subprocess_run(*args, **kwargs):
+            # Simulate osacompile creating the target app directory
+            app_path = args[0][2]
+            os.makedirs(app_path, exist_ok=True)
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("subprocess.run", side_effect=mock_subprocess_run),
+            mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install()
+
+        # It should have copied to ~/Applications
         assert (tmp_path / "Applications" / "MoleditPy.app").exists()
 
     def test_install_unsupported_os(self, tmp_path, capsys):
