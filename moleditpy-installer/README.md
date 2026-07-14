@@ -81,7 +81,9 @@ This package is a helper utility that automatically installs the correct version
 - The bundle is ad-hoc code-signed after configuration; required on Apple Silicon.
 
 ### Linux
-- Application-menu and Desktop `.desktop` entries (icon included).
+- Application-menu and Desktop `.desktop` entries (icon included), launched in a terminal so output stays visible (matching macOS).
+- `.pmeprj` files open MoleditPy on double-click: a per-user `application/x-moleditpy-project` MIME type is registered (freedesktop shared-mime-info, no root needed) and set as the default handler.
+- `.pmeprj` documents get their own file icon in file managers, matching Windows and macOS.
 
 `moleditpy-installer --remove` undoes all of the above for the current user.
 
@@ -91,5 +93,6 @@ This package is a helper utility that automatically installs the correct version
 - **Fixed:** `ModuleNotFoundError: No module named 'moleditpy'` when the installer ran in a different Python environment than the one holding `moleditpy` — the launcher now uses the script's own interpreter and the command is verified at install time.
 - **New:** MoleditPy launches in a visible Terminal window on macOS.
 - **New:** `.pmeprj` double-click support on macOS via a proper exported UTI + Launch Services registration.
+- **New:** `.pmeprj` double-click support and document icon on Linux (per-user MIME registration).
 - **New:** `--check` verifies launchability on macOS; `--remove` also unregisters the bundle from Launch Services and removes extracted icons.
 - Icons no longer live in the temp folder (Windows shortcut/registry icons no longer break after cleanup).

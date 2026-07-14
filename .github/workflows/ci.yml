@@ -36,3 +36,169 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
 
+  smoke-macos:
+    name: Smoke test (macOS end-to-end)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install installer (without moleditpy)
+        run: |
+          pip install pyshortcuts
+          pip install -e "moleditpy-installer/" --no-deps
+
+      - name: Create dummy moleditpy executable
+        run: |
+          BIN_DIR="$(dirname "$(which python)")"
+          cat > "$BIN_DIR/moleditpy" << 'EOF'
+          #!/usr/bin/env python3
+          import sys
+          if "--version" in sys.argv:
+              print("MoleditPy 0.0.0-smoke")
+              sys.exit(0)
+          print("smoke launch:", sys.argv[1:])
+          EOF
+          chmod +x "$BIN_DIR/moleditpy"
+          moleditpy --version
+
+      - name: Run installer
+        run: moleditpy-installer
+
+      - name: Verify app bundle
+        run: |
+          APP="$HOME/Applications/MoleditPy.app"
+          test -d "$APP"
+          test -d "$HOME/Desktop/MoleditPy.app"
+          # signature must be valid — a broken one fails silently on Apple Silicon
+          codesign --verify --deep --strict "$APP"
+          # bundle identity + .pmeprj document type
+          PLIST="$APP/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = "com.moleditpy.launcher"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0' "$PLIST" | grep -x pmeprj
+          /usr/libexec/PlistBuddy -c 'Print :UTExportedTypeDeclarations:0:UTTypeIdentifier' "$PLIST" | grep -x com.moleditpy.pmeprj
+          # icons in place, asset-catalog override stripped
+          test -f "$APP/Contents/Resources/applet.icns"
+          test -f "$APP/Contents/Resources/file_icon.icns"
+          test ! -f "$APP/Contents/Resources/Assets.car"
+          if /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$PLIST" 2>/dev/null; then
+            echo "CFBundleIconName must be removed" && exit 1
+          fi
+
+      - name: Verify --check and --remove
+        run: |
+          moleditpy-installer --check
+          moleditpy-installer --remove
+          test ! -d "$HOME/Applications/MoleditPy.app"
+          test ! -d "$HOME/Desktop/MoleditPy.app"
+
+  smoke-windows:
+    name: Smoke test (Windows end-to-end)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install installer (without moleditpy)
+        shell: bash
+        run: |
+          pip install pyshortcuts
+          pip install -e "moleditpy-installer/" --no-deps
+
+      - name: Create dummy moleditpy executable
+        shell: bash
+        run: |
+          SCRIPTS_DIR="$(dirname "$(which python)")/Scripts"
+          mkdir -p "$SCRIPTS_DIR"
+          # never executed by the installer on Windows — only located
+          printf 'MZ dummy' > "$SCRIPTS_DIR/moleditpy.exe"
+
+      - name: Run installer
+        shell: bash
+        run: moleditpy-installer
+
+      - name: Verify shortcuts and registry
+        shell: bash
+        run: |
+          test -f "$(cygpath "$APPDATA")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
+          test -f "$(cygpath "$USERPROFILE")/Desktop/MoleditPy.lnk"
+          reg query 'HKCU\Software\Classes\.pmeprj' //ve | grep -i 'MoleditPy.File'
+          reg query 'HKCU\Software\Classes\MoleditPy.File\shell\open' //ve | grep -i 'Open with MoleditPy'
+          reg query 'HKCU\Software\Classes\MoleditPy.File\shell\open\command' //ve | grep -i 'moleditpy.exe'
+          reg query 'HKCU\Software\Classes\MoleditPy.File\DefaultIcon' //ve | grep -i 'file_icon.ico'
+          # the icon must live in the persistent dir, not %TEMP%
+          test -f "$(cygpath "$LOCALAPPDATA")/MoleditPy/installer/file_icon.ico"
+
+      - name: Verify --check and --remove
+        shell: bash
+        run: |
+          moleditpy-installer --check
+          moleditpy-installer --remove
+          test ! -f "$(cygpath "$APPDATA")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
+          test ! -f "$(cygpath "$USERPROFILE")/Desktop/MoleditPy.lnk"
+          if reg query 'HKCU\Software\Classes\.pmeprj' //ve 2> /dev/null; then
+            echo ".pmeprj association must be removed" && exit 1
+          fi
+
+  smoke-linux:
+    name: Smoke test (Linux end-to-end)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install installer (without moleditpy)
+        run: |
+          pip install pyshortcuts
+          pip install -e "moleditpy-installer/" --no-deps
+
+      - name: Create dummy moleditpy executable
+        run: |
+          BIN_DIR="$(dirname "$(which python)")"
+          cat > "$BIN_DIR/moleditpy" << 'EOF'
+          #!/usr/bin/env python3
+          import sys
+          if "--version" in sys.argv:
+              print("MoleditPy 0.0.0-smoke")
+              sys.exit(0)
+          print("smoke launch:", sys.argv[1:])
+          EOF
+          chmod +x "$BIN_DIR/moleditpy"
+          mkdir -p "$HOME/Desktop"
+          moleditpy --version
+
+      - name: Run installer
+        run: moleditpy-installer
+
+      - name: Verify desktop entry and MIME registration
+        run: |
+          DESKTOP="$HOME/.local/share/applications/MoleditPy.desktop"
+          test -f "$DESKTOP"
+          grep -x 'Terminal=true' "$DESKTOP"
+          grep -x 'MimeType=application/x-moleditpy-project;' "$DESKTOP"
+          test -f "$HOME/.local/share/mime/packages/moleditpy.xml"
+          grep -q 'pattern="\*.pmeprj"' "$HOME/.local/share/mime/packages/moleditpy.xml"
+          test -f "$HOME/.local/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png"
+          # the MIME database must resolve .pmeprj to our type
+          touch /tmp/sample.pmeprj
+          xdg-mime query filetype /tmp/sample.pmeprj | grep -x application/x-moleditpy-project
+
+      - name: Verify --remove
+        run: |
+          moleditpy-installer --remove
+          test ! -f "$HOME/.local/share/applications/MoleditPy.desktop"
+          test ! -f "$HOME/.local/share/mime/packages/moleditpy.xml"
+          test ! -f "$HOME/.local/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png"
+

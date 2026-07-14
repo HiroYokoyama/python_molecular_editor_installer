@@ -1098,6 +1098,7 @@ class TestInstall:
         with (
             mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
             mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "register_file_associations_linux"),
             mock.patch("platform.system", return_value="Linux"),
             mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
             mock.patch.dict(os.environ, {}, clear=True),
@@ -1348,6 +1349,7 @@ class TestInstall:
         with (
             mock.patch.object(installer_main, "find_executable", side_effect=fake_find),
             mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "register_file_associations_linux"),
             mock.patch("platform.system", return_value="Linux"),
             mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
             mock.patch.dict(os.environ, {}, clear=True),
@@ -1917,3 +1919,198 @@ class TestDarwinAppIconOverride:
         app = self._install_with_fake_osacompile(tmp_path)
 
         assert not (app / "Contents" / "stale-marker").exists()
+
+
+# ---------------------------------------------------------------------------
+# Linux file associations
+# ---------------------------------------------------------------------------
+
+
+class TestLinuxFileAssociations:
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path):
+        persistent = tmp_path / "persistent"
+        persistent.mkdir()
+        with (
+            mock.patch.object(
+                installer_main, "get_persistent_data_dir", return_value=persistent
+            ),
+            mock.patch.object(installer_main, "_run_quiet", return_value=True),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            yield
+
+    def test_returns_false_on_non_linux(self):
+        with mock.patch("platform.system", return_value="Windows"):
+            assert installer_main.register_file_associations_linux() is False
+
+    def test_registers_mime_type_and_icon(self, tmp_path):
+        with mock.patch("platform.system", return_value="Linux"):
+            assert installer_main.register_file_associations_linux() is True
+
+        mime_xml = tmp_path / ".local" / "share" / "mime" / "packages" / "moleditpy.xml"
+        assert mime_xml.exists()
+        content = mime_xml.read_text(encoding="utf-8")
+        assert 'type="application/x-moleditpy-project"' in content
+        assert 'pattern="*.pmeprj"' in content
+
+        icon = (
+            tmp_path
+            / ".local"
+            / "share"
+            / "icons"
+            / "hicolor"
+            / "256x256"
+            / "mimetypes"
+            / "application-x-moleditpy-project.png"
+        )
+        assert icon.exists()
+        assert icon.read_bytes()[:4] == b"\x89PNG"
+
+    def test_sets_default_handler(self, tmp_path):
+        with mock.patch("platform.system", return_value="Linux"):
+            installer_main.register_file_associations_linux()
+
+        run_quiet_calls = [c.args[0] for c in installer_main._run_quiet.call_args_list]
+        assert [
+            "xdg-mime",
+            "default",
+            "MoleditPy.desktop",
+            "application/x-moleditpy-project",
+        ] in run_quiet_calls
+
+    def test_unregister_removes_files(self, tmp_path):
+        with mock.patch("platform.system", return_value="Linux"):
+            installer_main.register_file_associations_linux()
+            installer_main.unregister_file_associations_linux()
+
+        assert not (
+            tmp_path / ".local" / "share" / "mime" / "packages" / "moleditpy.xml"
+        ).exists()
+        assert not (
+            tmp_path
+            / ".local"
+            / "share"
+            / "icons"
+            / "hicolor"
+            / "256x256"
+            / "mimetypes"
+            / "application-x-moleditpy-project.png"
+        ).exists()
+
+    def test_packaged_file_icon_png_is_valid(self):
+        import importlib.resources
+
+        ref = (
+            importlib.resources.files("moleditpy_installer") / "data" / "file_icon.png"
+        )
+        assert ref.read_bytes()[:4] == b"\x89PNG"
+
+
+class TestPatchLinuxDesktopEntry:
+    def test_patches_terminal_mimetype_and_exec(self, tmp_path):
+        desktop = tmp_path / "MoleditPy.desktop"
+        desktop.write_text(
+            "[Desktop Entry]\n"
+            "Name=MoleditPy\n"
+            "Exec=/usr/bin/moleditpy\n"
+            "Terminal=false\n",
+            encoding="utf-8",
+        )
+
+        assert installer_main._patch_linux_desktop_entry(desktop) is True
+        lines = desktop.read_text(encoding="utf-8").splitlines()
+        assert "Terminal=true" in lines
+        assert "Terminal=false" not in lines
+        assert "MimeType=application/x-moleditpy-project;" in lines
+        assert "Exec=/usr/bin/moleditpy %f" in lines
+
+    def test_idempotent(self, tmp_path):
+        desktop = tmp_path / "MoleditPy.desktop"
+        desktop.write_text(
+            "[Desktop Entry]\nExec=/usr/bin/moleditpy %f\nTerminal=true\n",
+            encoding="utf-8",
+        )
+
+        installer_main._patch_linux_desktop_entry(desktop)
+        installer_main._patch_linux_desktop_entry(desktop)
+        lines = desktop.read_text(encoding="utf-8").splitlines()
+        assert lines.count("MimeType=application/x-moleditpy-project;") == 1
+        assert lines.count("Terminal=true") == 1
+        assert lines.count("Exec=/usr/bin/moleditpy %f") == 1
+
+    def test_returns_false_when_missing(self, tmp_path):
+        assert (
+            installer_main._patch_linux_desktop_entry(tmp_path / "nope.desktop")
+            is False
+        )
+
+    def test_install_linux_registers_associations(self, tmp_path):
+        fake_exe = str(tmp_path / "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "register_file_associations_linux"
+            ) as mock_reg,
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("moleditpy_installer.main.make_shortcut"),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            assert installer_main.install() == 0
+
+        mock_reg.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# System-wide conda search paths
+# ---------------------------------------------------------------------------
+
+
+class TestSystemCondaSearch:
+    def test_finds_exe_in_system_conda_root(self, tmp_path):
+        """/opt/miniconda3-style installs must be searched explicitly."""
+        conda_root = tmp_path / "opt_conda"
+        (conda_root / "bin").mkdir(parents=True)
+        with mock.patch("platform.system", return_value="Linux"):
+            _make_fake_exe(conda_root / "bin", "moleditpy")
+
+            with (
+                mock.patch.object(installer_main, "_SYSTEM_CONDA_ROOTS", [conda_root]),
+                mock.patch.object(
+                    installer_main.sys, "executable", str(tmp_path / "py" / "python")
+                ),
+                mock.patch.object(
+                    installer_main.sys, "argv", [str(tmp_path / "py" / "x.py")]
+                ),
+                mock.patch("shutil.which", return_value=None),
+                mock.patch("pathlib.Path.home", return_value=tmp_path / "home"),
+            ):
+                result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert "opt_conda" in result
+
+    def test_finds_exe_in_system_conda_env(self, tmp_path):
+        conda_root = tmp_path / "opt_conda"
+        env_bin = conda_root / "envs" / "chem" / "bin"
+        env_bin.mkdir(parents=True)
+        with mock.patch("platform.system", return_value="Linux"):
+            _make_fake_exe(env_bin, "moleditpy")
+
+            with (
+                mock.patch.object(installer_main, "_SYSTEM_CONDA_ROOTS", [conda_root]),
+                mock.patch.object(
+                    installer_main.sys, "executable", str(tmp_path / "py" / "python")
+                ),
+                mock.patch.object(
+                    installer_main.sys, "argv", [str(tmp_path / "py" / "x.py")]
+                ),
+                mock.patch("shutil.which", return_value=None),
+                mock.patch("pathlib.Path.home", return_value=tmp_path / "home"),
+            ):
+                result = installer_main.find_executable("moleditpy")
+
+        assert result is not None
+        assert "chem" in result

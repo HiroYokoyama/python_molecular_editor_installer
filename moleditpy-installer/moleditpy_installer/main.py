@@ -26,6 +26,23 @@ except ImportError:
 
 from pyshortcuts import make_shortcut
 
+# System-wide conda locations on Linux/macOS (home-dir installs are handled
+# separately). /opt/miniconda3 is the macOS pkg-installer default; /opt/conda
+# is the docker/miniforge convention. Module-level so tests can patch it.
+_SYSTEM_CONDA_ROOTS = [
+    Path("/opt/miniconda3"),
+    Path("/opt/anaconda3"),
+    Path("/opt/conda"),
+    Path("/opt/homebrew/Caskroom/miniconda/base"),
+    Path("/usr/local/miniconda3"),
+    Path("/usr/local/anaconda3"),
+]
+
+# MIME type registered for .pmeprj on Linux; the icon name is derived from
+# it per the freedesktop spec ('/' -> '-').
+LINUX_MIME_TYPE = "application/x-moleditpy-project"
+_LINUX_MIME_ICON_NAME = "application-x-moleditpy-project"
+
 
 def get_persistent_data_dir() -> Path:
     """
@@ -270,6 +287,19 @@ def find_executable(name: str) -> Optional[str]:
                 if found:
                     return found
 
+        # System-wide Conda installations (e.g. /opt/miniconda3 — the macOS
+        # pkg-installer default) and their environments
+        for conda_root in _SYSTEM_CONDA_ROOTS:
+            found = _check(conda_root / "bin")
+            if found:
+                return found
+            for scripts_dir in sorted(
+                (conda_root / "envs").glob("*/bin"), reverse=True
+            ):
+                found = _check(scripts_dir)
+                if found:
+                    return found
+
         # Other Unix-like package manager and user directories
         unix_search_paths = [
             Path.home() / "miniconda3" / "bin",
@@ -329,6 +359,12 @@ def register_file_associations_windows(exe_path: str, icon_path: Optional[str]) 
                 winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{prog_id}\\DefaultIcon"
             ) as key:
                 winreg.SetValue(key, "", winreg.REG_SZ, icon_path)
+
+        # Friendly context-menu label for the open verb
+        with winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{prog_id}\\shell\\open"
+        ) as key:
+            winreg.SetValue(key, "", winreg.REG_SZ, f"Open with {app_name}")
 
         # Set open command
         # Quote paths to handle spaces
@@ -449,6 +485,130 @@ def register_file_associations_darwin(app_path: Path) -> bool:
         return False
 
 
+def _run_quiet(cmd: list) -> bool:
+    """Run a helper command best-effort: missing tools are not an error."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=60)
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _patch_linux_desktop_entry(desktop_path: Path) -> bool:
+    """
+    Post-edit a pyshortcuts-generated .desktop file: bind the .pmeprj MIME
+    type and run in a terminal (matching the macOS launcher behavior, so
+    Python output and errors stay visible).
+    """
+    if not desktop_path.is_file():
+        return False
+
+    try:
+        lines = desktop_path.read_text(encoding="utf-8").splitlines()
+        out = []
+        for line in lines:
+            if line.startswith("Terminal="):
+                line = "Terminal=true"
+            elif line.startswith("MimeType="):
+                continue  # rewritten below
+            elif line.startswith("Exec=") and "%f" not in line and "%F" not in line:
+                # accept a file argument from the file manager
+                line = line.rstrip() + " %f"
+            out.append(line)
+        if not any(ln == "Terminal=true" for ln in out):
+            out.append("Terminal=true")
+        out.append(f"MimeType={LINUX_MIME_TYPE};")
+        desktop_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        return True
+    except OSError as e:
+        print(f"Warning: could not update {desktop_path}: {e}")
+        return False
+
+
+def register_file_associations_linux() -> bool:
+    """
+    Register the .pmeprj MIME type, its file icon, and the default handler
+    on Linux (freedesktop shared-mime-info; per-user, no root needed).
+    """
+    if platform.system() != "Linux":
+        return False
+
+    try:
+        print("Registering file associations...")
+        data_home = Path.home() / ".local" / "share"
+
+        # 1. MIME type definition
+        mime_dir = data_home / "mime"
+        packages_dir = mime_dir / "packages"
+        packages_dir.mkdir(parents=True, exist_ok=True)
+        mime_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="{LINUX_MIME_TYPE}">
+    <comment>MoleditPy Project File</comment>
+    <glob pattern="*.pmeprj"/>
+  </mime-type>
+</mime-info>
+"""
+        (packages_dir / "moleditpy.xml").write_text(mime_xml, encoding="utf-8")
+        _run_quiet(["update-mime-database", str(mime_dir)])
+
+        # 2. Document icon for the MIME type (counterpart of the Windows
+        # DefaultIcon registry value / macOS file_icon.icns)
+        icon_png = _extract_data_file("file_icon.png")
+        if icon_png:
+            mimetypes_icon_dir = (
+                data_home / "icons" / "hicolor" / "256x256" / "mimetypes"
+            )
+            mimetypes_icon_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(icon_png, mimetypes_icon_dir / f"{_LINUX_MIME_ICON_NAME}.png")
+            _run_quiet(["gtk-update-icon-cache", str(data_home / "icons" / "hicolor")])
+
+        # 3. Bind the MIME type to the .desktop entry and set it as default
+        apps_dir = data_home / "applications"
+        _patch_linux_desktop_entry(apps_dir / "MoleditPy.desktop")
+        _patch_linux_desktop_entry(Path.home() / "Desktop" / "MoleditPy.desktop")
+        _run_quiet(["update-desktop-database", str(apps_dir)])
+        _run_quiet(["xdg-mime", "default", "MoleditPy.desktop", LINUX_MIME_TYPE])
+
+        print(f"  Associated .pmeprj with MoleditPy ({LINUX_MIME_TYPE})")
+        print("File associations registered successfully.")
+        return True
+
+    except OSError as e:
+        print(f"Failed to register file associations: {e}")
+        return False
+
+
+def unregister_file_associations_linux() -> None:
+    """Remove the .pmeprj MIME type, its icon, and refresh the databases."""
+    if platform.system() != "Linux":
+        return
+
+    print("Unregistering file associations...")
+    data_home = Path.home() / ".local" / "share"
+    mime_dir = data_home / "mime"
+    for path in (
+        mime_dir / "packages" / "moleditpy.xml",
+        data_home
+        / "icons"
+        / "hicolor"
+        / "256x256"
+        / "mimetypes"
+        / f"{_LINUX_MIME_ICON_NAME}.png",
+    ):
+        try:
+            if path.exists():
+                path.unlink()
+                print(f"  Removed: {path}")
+        except OSError as e:
+            print(f"  Failed to remove {path}: {e}")
+
+    _run_quiet(["update-mime-database", str(mime_dir)])
+    _run_quiet(["update-desktop-database", str(data_home / "applications")])
+    _run_quiet(["gtk-update-icon-cache", str(data_home / "icons" / "hicolor")])
+    print("File associations unregistered.")
+
+
 def delete_registry_tree(key, sub_key):
     """
     Deletes a registry key and all its subkeys.
@@ -537,6 +697,8 @@ def remove_shortcut() -> None:
             home / ".local" / "share" / "applications" / f"{shortcut_name}.desktop"
         )
         shortcut_paths.append(home / "Desktop" / f"{shortcut_name}.desktop")
+
+        unregister_file_associations_linux()
 
     elif system == "Darwin":
         home = Path.home()
@@ -802,6 +964,9 @@ def install() -> int:
             print(
                 f"Successfully created '{shortcut_name}' in the application menu and on the Desktop."
             )
+
+            if system == "Linux":
+                register_file_associations_linux()
 
         elif system == "Darwin":
             print("macOS detected. Creating application shortcut natively...")
