@@ -2114,3 +2114,39 @@ class TestSystemCondaSearch:
 
         assert result is not None
         assert "chem" in result
+
+
+class TestDarwinDocTypeReplacement:
+    def test_replaces_applet_default_doc_types(self, tmp_path):
+        """osacompile applets ship a default document type; the launcher
+        must claim ONLY .pmeprj, so registration replaces the list."""
+        import plistlib
+
+        app_path = tmp_path / "MoleditPy.app"
+        contents_path = app_path / "Contents"
+        contents_path.mkdir(parents=True)
+        plist_path = contents_path / "Info.plist"
+        with open(plist_path, "wb") as fp:
+            plistlib.dump(
+                {
+                    "CFBundleDocumentTypes": [
+                        {
+                            "CFBundleTypeExtensions": ["*"],
+                            "CFBundleTypeName": "Applet Default",
+                        }
+                    ]
+                },
+                fp,
+            )
+
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch.object(installer_main, "_extract_data_file", return_value=None),
+        ):
+            assert installer_main.register_file_associations_darwin(app_path) is True
+
+        with open(plist_path, "rb") as fp:
+            pl = plistlib.load(fp)
+        doc_types = pl["CFBundleDocumentTypes"]
+        assert len(doc_types) == 1
+        assert doc_types[0]["CFBundleTypeExtensions"] == ["pmeprj"]

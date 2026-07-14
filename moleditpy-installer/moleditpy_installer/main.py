@@ -443,8 +443,9 @@ def register_file_associations_darwin(app_path: Path) -> bool:
                 "LSItemContentTypes": ["com.moleditpy.pmeprj"],
                 "CFBundleTypeIconFile": doc_icon_name,
             }
-            doc_types.append(new_doc_type)
-            pl["CFBundleDocumentTypes"] = doc_types
+            # Replace, don't append: osacompile applets ship a default
+            # document type, and the launcher must claim ONLY .pmeprj.
+            pl["CFBundleDocumentTypes"] = [new_doc_type]
 
             # Export a UTI for .pmeprj: modern macOS binds document types
             # through UTIs, and an unknown extension without one only gets

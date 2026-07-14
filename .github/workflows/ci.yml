@@ -71,16 +71,23 @@ jobs:
 
       - name: Verify app bundle
         run: |
+          set -x
           APP="$HOME/Applications/MoleditPy.app"
           test -d "$APP"
           test -d "$HOME/Desktop/MoleditPy.app"
           # signature must be valid — a broken one fails silently on Apple Silicon
           codesign --verify --deep --strict "$APP"
-          # bundle identity + .pmeprj document type
+          # bundle identity + .pmeprj document type (index-independent checks)
           PLIST="$APP/Contents/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = "com.moleditpy.launcher"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0' "$PLIST" | grep -x pmeprj
-          /usr/libexec/PlistBuddy -c 'Print :UTExportedTypeDeclarations:0:UTTypeIdentifier' "$PLIST" | grep -x com.moleditpy.pmeprj
+          plutil -p "$PLIST" | grep -q '"pmeprj"'
+          plutil -p "$PLIST" | grep -q 'com.moleditpy.pmeprj'
+          # the launcher must claim ONLY .pmeprj (osacompile's default
+          # document type must be replaced, not appended to)
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0' "$PLIST")" = "pmeprj"
+          if /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:1' "$PLIST" 2>/dev/null; then
+            echo "unexpected extra document type" && exit 1
+          fi
           # icons in place, asset-catalog override stripped
           test -f "$APP/Contents/Resources/applet.icns"
           test -f "$APP/Contents/Resources/file_icon.icns"
@@ -182,8 +189,12 @@ jobs:
       - name: Run installer
         run: moleditpy-installer
 
+      - name: Install desktop tooling
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shared-mime-info libglib2.0-bin
+
       - name: Verify desktop entry and MIME registration
         run: |
+          set -x
           DESKTOP="$HOME/.local/share/applications/MoleditPy.desktop"
           test -f "$DESKTOP"
           grep -x 'Terminal=true' "$DESKTOP"
@@ -191,9 +202,14 @@ jobs:
           test -f "$HOME/.local/share/mime/packages/moleditpy.xml"
           grep -q 'pattern="\*.pmeprj"' "$HOME/.local/share/mime/packages/moleditpy.xml"
           test -f "$HOME/.local/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png"
-          # the MIME database must resolve .pmeprj to our type
+          # the compiled per-user MIME database must contain our glob
+          # (xdg-mime query is unreliable on a bare runner — it falls back
+          # to file(1) magic, which ignores per-user glob databases)
+          update-mime-database "$HOME/.local/share/mime"
+          grep 'application/x-moleditpy-project:\*\.pmeprj' "$HOME/.local/share/mime/globs2"
+          # gio consults the shared-mime db (including the user dir)
           touch /tmp/sample.pmeprj
-          xdg-mime query filetype /tmp/sample.pmeprj | grep -x application/x-moleditpy-project
+          gio info -a standard::content-type /tmp/sample.pmeprj | grep application/x-moleditpy-project
 
       - name: Verify --remove
         run: |
