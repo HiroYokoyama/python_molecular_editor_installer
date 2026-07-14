@@ -207,8 +207,10 @@ jobs:
           # to file(1) magic, which ignores per-user glob databases)
           update-mime-database "$HOME/.local/share/mime"
           grep 'application/x-moleditpy-project:\*\.pmeprj' "$HOME/.local/share/mime/globs2"
-          # gio consults the shared-mime db (including the user dir)
-          touch /tmp/sample.pmeprj
+          # gio consults the shared-mime db (including the user dir);
+          # the file must be non-empty — zero-byte files resolve to
+          # application/x-zerosize, which beats glob matching
+          echo '{}' > /tmp/sample.pmeprj
           gio info -a standard::content-type /tmp/sample.pmeprj | grep application/x-moleditpy-project
 
       - name: Verify --remove
