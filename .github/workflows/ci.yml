@@ -99,7 +99,7 @@ jobs:
       - name: Verify --check and --remove
         run: |
           moleditpy-installer --check
-          moleditpy-installer --remove
+          moleditpy-installer --uninstall
           test ! -d "$HOME/Applications/MoleditPy.app"
           test ! -d "$HOME/Desktop/MoleditPy.app"
 
@@ -144,15 +144,29 @@ jobs:
           # the icon must live in the persistent dir, not %TEMP%
           test -f "$(cygpath "$LOCALAPPDATA")/MoleditPy/installer/file_icon.ico"
 
-      - name: Verify --check and --remove
+      - name: Verify --check and --uninstall
         shell: bash
         run: |
           moleditpy-installer --check
-          moleditpy-installer --remove
+          moleditpy-installer --uninstall
           test ! -f "$(cygpath "$APPDATA")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
           test ! -f "$(cygpath "$USERPROFILE")/Desktop/MoleditPy.lnk"
           if reg query 'HKCU\Software\Classes\.pmeprj' //ve 2> /dev/null; then
             echo ".pmeprj association must be removed" && exit 1
+          fi
+
+      - name: Verify system-wide install and uninstall (admin)
+        shell: bash
+        run: |
+          set -x
+          moleditpy-installer --system
+          reg query 'HKLM\Software\Classes\.pmeprj' //ve | grep -i 'MoleditPy.File'
+          test -f "$(cygpath "$PROGRAMDATA")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
+          test -f "$(cygpath "$PROGRAMDATA")/MoleditPy/installer/file_icon.ico"
+          moleditpy-installer --uninstall --system
+          test ! -f "$(cygpath "$PROGRAMDATA")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
+          if reg query 'HKLM\Software\Classes\.pmeprj' //ve 2> /dev/null; then
+            echo "HKLM .pmeprj association must be removed" && exit 1
           fi
 
   smoke-linux:
@@ -215,7 +229,7 @@ jobs:
 
       - name: Verify --remove
         run: |
-          moleditpy-installer --remove
+          moleditpy-installer --uninstall
           test ! -f "$HOME/.local/share/applications/MoleditPy.desktop"
           test ! -f "$HOME/.local/share/mime/packages/moleditpy.xml"
           test ! -f "$HOME/.local/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png"
@@ -233,7 +247,7 @@ jobs:
           if moleditpy-installer --system --no-tui; then
             echo "--system without root must fail" && exit 1
           fi
-          sudo "$(which moleditpy-installer)" --remove --system
+          sudo "$(which moleditpy-installer)" --uninstall --system
           test ! -f /usr/share/applications/MoleditPy.desktop
           test ! -f /usr/share/mime/packages/moleditpy.xml
           test ! -f /usr/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png

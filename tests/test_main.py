@@ -41,6 +41,7 @@ def _make_winreg_mock():
     """Return a mock winreg module with the constants and functions needed."""
     m = types.ModuleType("winreg")
     m.HKEY_CURRENT_USER = 0x80000001
+    m.HKEY_LOCAL_MACHINE = 0x80000002
     m.KEY_ALL_ACCESS = 0xF003F
     m.REG_SZ = 1
 
@@ -884,7 +885,13 @@ class TestUnregisterFileAssociationsWindows:
             installer_main.unregister_file_associations_windows()
 
         assert winreg_mock.DeleteKey.call_count == 2  # .pmeprj and .pmeraw
-        mock_del.assert_called_once()
+        deleted = [c.args[1] for c in mock_del.call_args_list]
+        assert "Software\Classes\MoleditPy.File" in deleted
+        # Explorer's per-user FileExts cache must be cleared too, or the
+        # association looks still present after uninstall
+        assert (
+            "Software\Microsoft\Windows\CurrentVersion\\Explorer\FileExts\.pmeprj"
+        ) in deleted
 
     def test_ignores_already_missing_keys(self, capsys):
         winreg_mock = _make_winreg_mock()
@@ -2202,11 +2209,38 @@ class TestInstallOptions:
         assert result == 1
         assert "Nothing to install" in capsys.readouterr().out
 
-    def test_system_scope_rejected_on_windows(self, capsys):
-        with mock.patch("platform.system", return_value="Windows"):
+    def test_system_scope_needs_admin_on_windows(self, capsys):
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch.object(installer_main, "is_root", return_value=False),
+        ):
             result = installer_main.install(installer_main.InstallOptions(system=True))
         assert result == 1
-        assert "not supported on Windows" in capsys.readouterr().out
+        assert "elevated" in capsys.readouterr().out
+
+    def test_windows_system_scope_registers_hklm_and_moves_shortcuts(self, tmp_path):
+        fake_exe = str(tmp_path / "moleditpy.exe")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "get_file_icon_path", return_value=None),
+            mock.patch.object(installer_main, "is_root", return_value=True),
+            mock.patch.object(
+                installer_main, "register_file_associations_windows", return_value=True
+            ) as mock_assoc,
+            mock.patch.object(
+                installer_main, "_move_windows_shortcuts_to_all_users"
+            ) as mock_move,
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("moleditpy_installer.main.make_shortcut"),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            result = installer_main.install(installer_main.InstallOptions(system=True))
+
+        assert result == 0
+        mock_move.assert_called_once_with(False, True)
+        assert mock_assoc.call_args.kwargs.get("system") is True
 
     def test_system_scope_requires_root(self, capsys):
         with (
@@ -2607,13 +2641,21 @@ class TestMainDispatch:
             )
         )
 
-    def test_main_remove_passes_system_scope(self):
+    def test_main_uninstall_passes_system_scope(self):
         with (
-            mock.patch("sys.argv", ["moleditpy-installer", "--remove", "--system"]),
+            mock.patch("sys.argv", ["moleditpy-installer", "--uninstall", "--system"]),
             mock.patch.object(installer_main, "remove_shortcut") as mock_remove,
         ):
             assert installer_main.main() == 0
         mock_remove.assert_called_once_with(system_scope=True)
+
+    def test_main_remove_is_a_compatible_alias(self):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--remove"]),
+            mock.patch.object(installer_main, "remove_shortcut") as mock_remove,
+        ):
+            assert installer_main.main() == 0
+        mock_remove.assert_called_once_with(system_scope=False)
 
     def test_tui_available_false_without_tty(self):
         with mock.patch.object(sys.stdin, "isatty", return_value=False):
@@ -2831,3 +2873,171 @@ class TestTuiActions:
                     assert app.query_one("#install", Button).disabled is False
 
         asyncio.run(check())
+
+
+# ---------------------------------------------------------------------------
+# v3.0.3: COM guard, Explorer refresh, mimeapps cleanup, Windows system scope
+# ---------------------------------------------------------------------------
+
+
+class TestComInitialized:
+    def test_noop_off_windows(self):
+        with mock.patch("platform.system", return_value="Linux"):
+            with installer_main._com_initialized():
+                pass  # must not raise nor import pythoncom
+
+    @pytest.mark.skipif(
+        platform.system() != "Windows", reason="COM only exists on Windows"
+    )
+    def test_com_usable_in_worker_thread(self):
+        """Regression: TUI installs run in a worker thread where COM is not
+        initialized — pyshortcuts then fails with CO_E_NOTINITIALIZED."""
+        import threading
+
+        errors = []
+
+        def worker():
+            try:
+                from win32com.client import Dispatch
+
+                with installer_main._com_initialized():
+                    Dispatch("WScript.Shell")
+            except Exception as e:  # pragma: no cover - failure detail
+                errors.append(e)
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        assert not errors
+
+
+class TestWindowsAssocRefresh:
+    def test_register_notifies_explorer(self, tmp_path):
+        fake_winreg = _make_winreg_mock()
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch.object(installer_main, "winreg", fake_winreg),
+            mock.patch.object(
+                installer_main, "_notify_windows_assoc_changed"
+            ) as mock_notify,
+        ):
+            assert (
+                installer_main.register_file_associations_windows(
+                    str(tmp_path / "moleditpy.exe"), None
+                )
+                is True
+            )
+        mock_notify.assert_called_once()
+
+    def test_unregister_notifies_explorer(self):
+        fake_winreg = _make_winreg_mock()
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch.object(installer_main, "winreg", fake_winreg),
+            mock.patch.object(installer_main, "delete_registry_tree"),
+            mock.patch.object(
+                installer_main, "_notify_windows_assoc_changed"
+            ) as mock_notify,
+        ):
+            installer_main.unregister_file_associations_windows()
+        mock_notify.assert_called_once()
+
+    def test_system_scope_uses_hklm(self, tmp_path):
+        fake_winreg = _make_winreg_mock()
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch.object(installer_main, "winreg", fake_winreg),
+            mock.patch.object(installer_main, "_notify_windows_assoc_changed"),
+        ):
+            installer_main.register_file_associations_windows(
+                str(tmp_path / "moleditpy.exe"), None, system=True
+            )
+        roots = {c.args[0] for c in fake_winreg.CreateKey.call_args_list}
+        assert roots == {fake_winreg.HKEY_LOCAL_MACHINE}
+
+    def test_notify_helper_never_raises(self):
+        # cross-platform: on Windows fires SHChangeNotify, elsewhere no-op
+        installer_main._notify_windows_assoc_changed()
+
+
+class TestCleanLinuxMimeapps:
+    def test_removes_only_our_entries(self, tmp_path):
+        config = tmp_path / ".config"
+        config.mkdir()
+        mimeapps = config / "mimeapps.list"
+        mimeapps.write_text(
+            "[Default Applications]\n"
+            "application/x-moleditpy-project=MoleditPy.desktop;\n"
+            "text/plain=gedit.desktop;\n",
+            encoding="utf-8",
+        )
+
+        with (
+            mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config)}, clear=False),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            installer_main._clean_linux_mimeapps()
+
+        content = mimeapps.read_text(encoding="utf-8")
+        assert "moleditpy" not in content
+        assert "text/plain=gedit.desktop;" in content
+
+    def test_silent_when_files_missing(self, tmp_path):
+        with (
+            mock.patch.dict(
+                os.environ, {"XDG_CONFIG_HOME": str(tmp_path)}, clear=False
+            ),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            installer_main._clean_linux_mimeapps()  # must not raise
+
+
+class TestWindowsSystemRemove:
+    def test_windows_system_scope_warns_without_admin(self, tmp_path, capsys):
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(installer_main, "is_root", return_value=False),
+            mock.patch.object(installer_main, "unregister_file_associations_windows"),
+            mock.patch.object(
+                installer_main,
+                "get_persistent_data_dir",
+                return_value=tmp_path / "persistent",
+            ),
+        ):
+            installer_main.remove_shortcut(system_scope=True)
+
+        assert "administrator" in capsys.readouterr().out
+
+    def test_windows_system_scope_targets_all_users_paths(self, tmp_path):
+        env = {
+            "PROGRAMDATA": str(tmp_path / "ProgramData"),
+            "PUBLIC": str(tmp_path / "Public"),
+        }
+        pd_lnk = tmp_path / "ProgramData/Microsoft/Windows/Start Menu/Programs"
+        pd_lnk.mkdir(parents=True)
+        (pd_lnk / "MoleditPy.lnk").write_bytes(b"x")
+        (tmp_path / "Public/Desktop").mkdir(parents=True)
+        (tmp_path / "Public/Desktop/MoleditPy.lnk").write_bytes(b"x")
+
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(installer_main, "is_root", return_value=True),
+            mock.patch.object(
+                installer_main, "unregister_file_associations_windows"
+            ) as mock_unreg,
+            mock.patch.object(
+                installer_main,
+                "get_persistent_data_dir",
+                return_value=tmp_path / "persistent",
+            ),
+        ):
+            installer_main.remove_shortcut(system_scope=True)
+
+        assert not (pd_lnk / "MoleditPy.lnk").exists()
+        assert not (tmp_path / "Public/Desktop/MoleditPy.lnk").exists()
+        # user-level AND system-level (HKLM) registrations removed
+        assert mock.call(system=True) in mock_unreg.call_args_list

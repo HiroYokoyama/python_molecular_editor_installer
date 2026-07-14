@@ -66,8 +66,43 @@ class InstallOptions:
     system: bool = False  # system-wide (sudo/admin) instead of per-user
 
 
+@contextlib.contextmanager
+def _com_initialized():
+    """
+    Initialize COM for the current thread on Windows.
+
+    pyshortcuts creates .lnk files through COM, which must be initialized
+    per-thread. The TUI runs install() in a worker thread, where shortcut
+    creation otherwise fails with CO_E_NOTINITIALIZED
+    ("CoInitialize has not been called").
+    """
+    initialized = False
+    if platform.system() == "Windows":
+        try:
+            import pythoncom
+
+            pythoncom.CoInitialize()
+            initialized = True
+        except ImportError:
+            pass
+    try:
+        yield
+    finally:
+        if initialized:
+            import pythoncom
+
+            pythoncom.CoUninitialize()
+
+
 def is_root() -> bool:
-    """True when running with root privileges (POSIX only)."""
+    """True when running with root (POSIX) or admin (Windows) privileges."""
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except (OSError, AttributeError):
+            return False
     geteuid = getattr(os, "geteuid", None)
     return geteuid is not None and geteuid() == 0
 
@@ -80,7 +115,7 @@ def linux_data_home(system: bool = False) -> Path:
     return Path(xdg) if xdg else Path.home() / ".local" / "share"
 
 
-def get_persistent_data_dir() -> Path:
+def get_persistent_data_dir(system: bool = False) -> Path:
     """
     Per-user directory for extracted installer assets (icons).
 
@@ -89,7 +124,13 @@ def get_persistent_data_dir() -> Path:
     (which is periodically cleaned, silently breaking the icons).
     """
     if platform.system() == "Windows":
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        if system:
+            # all users must be able to read icons referenced from HKLM
+            base = os.environ.get("PROGRAMDATA") or "C:/ProgramData"
+        else:
+            base = os.environ.get("LOCALAPPDATA") or str(
+                Path.home() / "AppData" / "Local"
+            )
         data_dir = Path(base) / "MoleditPy" / "installer"
     else:
         data_dir = Path.home() / ".moleditpy" / "installer"
@@ -97,12 +138,12 @@ def get_persistent_data_dir() -> Path:
     return data_dir
 
 
-def _extract_data_file(file_name: str) -> Optional[str]:
+def _extract_data_file(file_name: str, system: bool = False) -> Optional[str]:
     """Extract a packaged data file to the persistent data dir and return its path."""
     try:
         ref = importlib.resources.files("moleditpy_installer") / "data" / file_name
         content = ref.read_bytes()
-        out_path = get_persistent_data_dir() / file_name
+        out_path = get_persistent_data_dir(system) / file_name
         out_path.write_bytes(content)
         return str(out_path)
     except (OSError, ModuleNotFoundError, ValueError) as e:
@@ -362,19 +403,44 @@ def find_executable(name: str) -> Optional[str]:
     return None
 
 
-def register_file_associations_windows(exe_path: str, icon_path: Optional[str]) -> bool:
+def _notify_windows_assoc_changed() -> None:
+    """
+    Tell Explorer the file associations changed.
+
+    Without SHChangeNotify(SHCNE_ASSOCCHANGED) Explorer keeps showing the
+    old association/icon from its cache until the next logon.
+    """
+    try:
+        import ctypes
+
+        SHCNE_ASSOCCHANGED = 0x08000000
+        SHCNF_IDLIST = 0x0
+        ctypes.windll.shell32.SHChangeNotify(
+            SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None
+        )
+    except (OSError, AttributeError):
+        pass  # not on Windows / shell32 unavailable
+
+
+def register_file_associations_windows(
+    exe_path: str, icon_path: Optional[str], system: bool = False
+) -> bool:
     """
     Register file associations for .pmeprj files on Windows.
 
     Args:
         exe_path (str): Path to the executable to associate.
         icon_path (Optional[str]): Path to the icon file for the association.
+        system (bool): Register machine-wide under HKLM (requires admin)
+            instead of per-user under HKCU.
 
     Returns:
         bool: True if successful, False otherwise.
     """
     if platform.system() != "Windows":
         return False
+
+    root = winreg.HKEY_LOCAL_MACHINE if system else winreg.HKEY_CURRENT_USER
 
     try:
         extensions = [".pmeprj"]
@@ -384,21 +450,19 @@ def register_file_associations_windows(exe_path: str, icon_path: Optional[str]) 
         print("Registering file associations...")
 
         # Create ProgID
-        with winreg.CreateKey(
-            winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{prog_id}"
-        ) as key:
+        with winreg.CreateKey(root, f"Software\\Classes\\{prog_id}") as key:
             winreg.SetValue(key, "", winreg.REG_SZ, f"{app_name} File")
 
         # Set default icon
         if icon_path and os.path.exists(icon_path):
             with winreg.CreateKey(
-                winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{prog_id}\\DefaultIcon"
+                root, f"Software\\Classes\\{prog_id}\\DefaultIcon"
             ) as key:
                 winreg.SetValue(key, "", winreg.REG_SZ, icon_path)
 
         # Friendly context-menu label for the open verb
         with winreg.CreateKey(
-            winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{prog_id}\\shell\\open"
+            root, f"Software\\Classes\\{prog_id}\\shell\\open"
         ) as key:
             winreg.SetValue(key, "", winreg.REG_SZ, f"Open with {app_name}")
 
@@ -406,19 +470,18 @@ def register_file_associations_windows(exe_path: str, icon_path: Optional[str]) 
         # Quote paths to handle spaces
         command = f'"{exe_path}" "%1"'
         with winreg.CreateKey(
-            winreg.HKEY_CURRENT_USER,
+            root,
             f"Software\\Classes\\{prog_id}\\shell\\open\\command",
         ) as key:
             winreg.SetValue(key, "", winreg.REG_SZ, command)
 
         # Associate extensions
         for ext in extensions:
-            with winreg.CreateKey(
-                winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{ext}"
-            ) as key:
+            with winreg.CreateKey(root, f"Software\\Classes\\{ext}") as key:
                 winreg.SetValue(key, "", winreg.REG_SZ, prog_id)
             print(f"  Associated {ext} with {app_name}")
 
+        _notify_windows_assoc_changed()
         print("File associations registered successfully.")
         return True
 
@@ -623,6 +686,27 @@ def register_file_associations_linux(system: bool = False) -> bool:
         return False
 
 
+def _clean_linux_mimeapps() -> None:
+    """Drop MoleditPy's MIME entries from the per-user mimeapps.list files
+    (xdg-mime has no 'unset'; a dangling default otherwise remains)."""
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    candidates = [
+        config_home / "mimeapps.list",
+        linux_data_home() / "applications" / "mimeapps.list",  # legacy location
+    ]
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            kept = [line for line in lines if LINUX_MIME_TYPE not in line]
+            if len(kept) != len(lines):
+                path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+                print(f"  Cleaned {path}")
+        except OSError as e:
+            print(f"  Failed to clean {path}: {e}")
+
+
 def unregister_file_associations_linux(system: bool = False) -> None:
     """Remove the .pmeprj MIME type, its icon, and refresh the databases."""
     if platform.system() != "Linux":
@@ -646,6 +730,9 @@ def unregister_file_associations_linux(system: bool = False) -> None:
                 print(f"  Removed: {path}")
         except OSError as e:
             print(f"  Failed to remove {path}: {e}")
+
+    if not system:
+        _clean_linux_mimeapps()
 
     _run_quiet(["update-mime-database", str(mime_dir)])
     _run_quiet(["update-desktop-database", str(data_home / "applications")])
@@ -710,17 +797,20 @@ def delete_registry_tree(key, sub_key):
         return False
 
 
-def unregister_file_associations_windows() -> None:
+def unregister_file_associations_windows(system: bool = False) -> None:
     """
     Unregister file associations for .pmeprj and .pmeraw files on Windows.
+    With ``system=True`` removes the machine-wide (HKLM) registration.
     """
     if platform.system() != "Windows":
         return
 
+    root = winreg.HKEY_LOCAL_MACHINE if system else winreg.HKEY_CURRENT_USER
+
     print("Unregistering file associations...")
     keys_to_remove = [
-        (winreg.HKEY_CURRENT_USER, "Software\\Classes\\.pmeprj"),
-        (winreg.HKEY_CURRENT_USER, "Software\\Classes\\.pmeraw"),
+        (root, "Software\\Classes\\.pmeprj"),
+        (root, "Software\\Classes\\.pmeraw"),
     ]
 
     # ProgID might have subkeys (shell, DefaultIcon), so we need recursive delete
@@ -738,9 +828,20 @@ def unregister_file_associations_windows() -> None:
                 print(f"  Failed to remove {key_path}: {e}")
 
         # Remove ProgID recursively
-        if delete_registry_tree(winreg.HKEY_CURRENT_USER, prog_id_key):
+        if delete_registry_tree(root, prog_id_key):
             print(f"  Removed registry tree: {prog_id_key}")
 
+        # Explorer pins its own per-user choice under FileExts; without
+        # removing it (and notifying), the association looks still present.
+        for ext in (".pmeprj",):
+            file_exts_key = (
+                "Software\\Microsoft\\Windows\\CurrentVersion\\"
+                f"Explorer\\FileExts\\{ext}"
+            )
+            if delete_registry_tree(winreg.HKEY_CURRENT_USER, file_exts_key):
+                print(f"  Removed Explorer cache: {file_exts_key}")
+
+        _notify_windows_assoc_changed()
         print("File associations unregistered.")
     except OSError as e:
         print(f"Error during file association removal: {e}")
@@ -757,11 +858,17 @@ def remove_shortcut(system_scope: bool = False) -> None:
     shortcut_paths = []
     shortcut_name = "MoleditPy"
 
-    if system_scope and system != "Windows" and not is_root():
-        print(
-            "Warning: removing a system-wide install requires root; "
-            "system files will likely remain. Re-run with sudo."
-        )
+    if system_scope and not is_root():
+        if system == "Windows":
+            print(
+                "Warning: removing a system-wide install requires an "
+                "administrator terminal; system entries will likely remain."
+            )
+        else:
+            print(
+                "Warning: removing a system-wide install requires root; "
+                "system files will likely remain. Re-run with sudo."
+            )
 
     if system == "Windows":
         # Usually in APPDATA/Microsoft/Windows/Start Menu/Programs
@@ -779,6 +886,20 @@ def remove_shortcut(system_scope: bool = False) -> None:
         shortcut_paths.append(Path.home() / "Desktop" / f"{shortcut_name}.lnk")
 
         unregister_file_associations_windows()
+
+        if system_scope:
+            program_data = os.environ.get("PROGRAMDATA") or "C:/ProgramData"
+            public = os.environ.get("PUBLIC") or "C:/Users/Public"
+            shortcut_paths.append(
+                Path(program_data)
+                / "Microsoft"
+                / "Windows"
+                / "Start Menu"
+                / "Programs"
+                / f"{shortcut_name}.lnk"
+            )
+            shortcut_paths.append(Path(public) / "Desktop" / f"{shortcut_name}.lnk")
+            unregister_file_associations_windows(system=True)
 
     elif system == "Linux":
         # Usually in ~/.local/share/applications/ plus a Desktop copy
@@ -832,11 +953,13 @@ def remove_shortcut(system_scope: bool = False) -> None:
     # Clean up the icons extracted at install time
     try:
         shutil.rmtree(get_persistent_data_dir(), ignore_errors=True)
+        if system_scope:
+            shutil.rmtree(get_persistent_data_dir(system=True), ignore_errors=True)
     except OSError:
         pass
 
 
-def get_file_icon_path() -> Optional[str]:
+def get_file_icon_path(system: bool = False) -> Optional[str]:
     """
     Gets the absolute path to the file icon (file_icon.ico) for Windows associations.
     """
@@ -845,7 +968,7 @@ def get_file_icon_path() -> Optional[str]:
 
     # Extract to a persistent location: as_file() paths may be temporary
     # (zip installs) and would be dead by the time the registry reads them.
-    return _extract_data_file("file_icon.ico")
+    return _extract_data_file("file_icon.ico", system=system)
 
 
 def python_for_executable(exe_path: str) -> str:
@@ -969,6 +1092,56 @@ def refresh_launch_services(app_path: Path, unregister: bool = False) -> None:
             return
 
 
+def _move_windows_shortcuts_to_all_users(desktop: bool, app_menu: bool) -> None:
+    """
+    Relocate freshly created per-user shortcuts to the all-users locations
+    (ProgramData Start Menu / Public Desktop). pyshortcuts only writes
+    per-user paths, so a system-wide install moves them afterwards.
+    """
+    name = "MoleditPy"
+    moves = []
+    appdata = os.environ.get("APPDATA")
+    program_data = os.environ.get("PROGRAMDATA") or "C:/ProgramData"
+    public = os.environ.get("PUBLIC") or "C:/Users/Public"
+
+    if app_menu and appdata:
+        moves.append(
+            (
+                Path(appdata)
+                / "Microsoft"
+                / "Windows"
+                / "Start Menu"
+                / "Programs"
+                / f"{name}.lnk",
+                Path(program_data)
+                / "Microsoft"
+                / "Windows"
+                / "Start Menu"
+                / "Programs"
+                / f"{name}.lnk",
+            )
+        )
+    if desktop:
+        moves.append(
+            (
+                Path.home() / "Desktop" / f"{name}.lnk",
+                Path(public) / "Desktop" / f"{name}.lnk",
+            )
+        )
+
+    for src, dest in moves:
+        if not src.is_file():
+            continue
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                dest.unlink()
+            shutil.move(str(src), str(dest))
+            print(f"Moved shortcut to all-users location: {dest}")
+        except OSError as e:
+            print(f"Warning: could not move {src} to {dest}: {e}")
+
+
 def install(options: Optional[InstallOptions] = None) -> int:
     """
     Creates shortcuts and file associations for the installed moleditpy
@@ -990,15 +1163,14 @@ def install(options: Optional[InstallOptions] = None) -> int:
         print("Nothing to install: all components are disabled.")
         return 1
 
-    if options.system:
+    if options.system and not is_root():
         if system == "Windows":
-            print("Error: system-wide installation is not supported on Windows.")
-            print("Run without --system for a per-user install (no admin needed).")
-            return 1
-        if not is_root():
+            print("Error: system-wide installation requires an elevated terminal.")
+            print("Re-run from an administrator terminal, or drop --system.")
+        else:
             print("Error: system-wide installation requires root privileges.")
             print("Re-run with sudo, or drop --system for a per-user install.")
-            return 1
+        return 1
 
     command_name = "moleditpy"
 
@@ -1081,14 +1253,19 @@ def install(options: Optional[InstallOptions] = None) -> int:
                             "skipped for a system-wide install."
                         )
                 else:
-                    make_shortcut(
-                        script=full_command,
-                        name=shortcut_name,
-                        icon=icon_path,
-                        desktop=options.desktop,
-                        startmenu=options.app_menu,
-                        noexe=True,
-                    )
+                    with _com_initialized():
+                        make_shortcut(
+                            script=full_command,
+                            name=shortcut_name,
+                            icon=icon_path,
+                            desktop=options.desktop,
+                            startmenu=options.app_menu,
+                            noexe=True,
+                        )
+                    if system == "Windows" and options.system:
+                        _move_windows_shortcuts_to_all_users(
+                            options.desktop, options.app_menu
+                        )
                     created_in = [
                         loc
                         for enabled, loc in (
@@ -1283,11 +1460,13 @@ end open
     # pickle-based format and is intentionally NOT associated with
     # double-click for safety).
     if system == "Windows" and original_exe_path and options.file_assoc:
-        file_icon_path = get_file_icon_path()
+        file_icon_path = get_file_icon_path(system=options.system)
         if not file_icon_path:
             file_icon_path = icon_path
 
-        register_file_associations_windows(str(original_exe_path), file_icon_path)
+        register_file_associations_windows(
+            str(original_exe_path), file_icon_path, system=options.system
+        )
 
     print("\nYou can remove the shortcut and file associations by running:")
     print("  moleditpy-installer --remove")
@@ -1343,9 +1522,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--uninstall",
         "--remove",
+        dest="uninstall",
         action="store_true",
-        help="Remove the shortcuts and unregister file associations.",
+        help=(
+            "Uninstall: remove the shortcuts and unregister file "
+            "associations (--remove is a deprecated alias)."
+        ),
     )
     parser.add_argument(
         "--check",
@@ -1373,7 +1557,7 @@ def main() -> int:
     parser.add_argument(
         "--system",
         action="store_true",
-        help="Install system-wide instead of per-user (Linux/macOS; requires sudo).",
+        help="Install system-wide instead of per-user (requires sudo/admin).",
     )
     parser.add_argument(
         "--no-tui",
@@ -1389,7 +1573,7 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    if args.remove:
+    if args.uninstall:
         remove_shortcut(system_scope=args.system)
         return 0
 

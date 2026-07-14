@@ -29,7 +29,7 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer --no-tui                 # install with the defaults
     moleditpy-installer --desktop                # also create a Desktop shortcut
     moleditpy-installer --no-file-assoc          # skip the .pmeprj association
-    sudo moleditpy-installer --system            # system-wide (Linux/macOS)
+    sudo moleditpy-installer --system            # system-wide (admin terminal on Windows)
     ```
 
     Any explicit option skips the TUI.
@@ -50,13 +50,13 @@ This package is a helper utility that automatically installs the correct version
 
     > **Tip:** Run the installer from the Python environment where `moleditpy` is installed (e.g. after `conda activate <env>`). The installer verifies the launch command and warns you if the pairing cannot start MoleditPy.
 
-3.  **Remove Shortcut**
-    To remove the shortcuts, unregister file associations, and clean up extracted icon files, run (add `--system` for a system-wide install):
+3.  **Uninstall**
+    To remove the shortcuts, unregister file associations, and clean up extracted icon files, run (add `--system` for a system-wide install; `--remove` remains as a deprecated alias):
 
     ```bash
-    moleditpy-installer --remove
+    moleditpy-installer --uninstall
     # or
-    python -m moleditpy_installer --remove
+    python -m moleditpy_installer --uninstall
     ```
 
 4.  **Check Executable Location**
@@ -86,7 +86,7 @@ This package is a helper utility that automatically installs the correct version
 ## What the installer sets up
 
 ### Windows
-- Start Menu shortcut (icon included); Desktop shortcut when enabled (`--desktop` or the TUI checkbox).
+- Start Menu shortcut (icon included); Desktop shortcut when enabled (`--desktop` or the TUI checkbox). With `--system` (admin) the shortcuts go to the all-users locations and the association to HKLM.
 - `.pmeprj` files open MoleditPy on double-click (per-user registry, no admin rights needed).
 - Icons are stored under `%LOCALAPPDATA%\MoleditPy\installer` so they survive temp-folder cleanup.
 
@@ -102,13 +102,13 @@ This package is a helper utility that automatically installs the correct version
 - `.pmeprj` files open MoleditPy on double-click: a per-user `application/x-moleditpy-project` MIME type is registered (freedesktop shared-mime-info, no root needed) and set as the default handler.
 - `.pmeprj` documents get their own file icon in file managers, matching Windows and macOS.
 
-`moleditpy-installer --remove` undoes all of the above for the current user.
+`moleditpy-installer --uninstall` undoes all of the above for the current user (add `--system` for system-wide installs).
 
 ## Version 3.0 highlights
 
 - **New:** interactive Textual TUI — pick components and scope, watch the log, press Install/Remove.
 - **New:** component selection (`--desktop`, `--app-menu`, `--file-assoc`) with safer defaults (no Desktop shortcut unless requested).
-- **New:** system-wide scope on Linux (`/usr/share`, requires sudo) and macOS (`/Applications`); Windows stays per-user.
+- **New:** system-wide scope on Linux (`/usr/share`), macOS (`/Applications`), and Windows (HKLM + all-users Start Menu; admin terminal) — all requiring sudo/admin.
 - Per-user Linux paths now honor `XDG_DATA_HOME`.
 - End-to-end smoke tests on all three OSes in CI, including the sudo/system path.
 

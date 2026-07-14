@@ -101,7 +101,7 @@ class InstallerApp(App):
 
     BINDINGS = [
         ("i", "install", "Install"),
-        ("r", "remove", "Remove"),
+        ("u", "remove", "Uninstall"),
         ("q", "quit", "Quit"),
     ]
 
@@ -121,13 +121,12 @@ class InstallerApp(App):
             with RadioSet(id="scope"):
                 yield RadioButton("User (recommended)", value=True, id="scope_user")
                 yield RadioButton(
-                    "System-wide (requires sudo/root)",
+                    "System-wide (requires sudo / admin terminal)",
                     id="scope_system",
-                    disabled=platform.system() == "Windows",
                 )
         with Horizontal(id="buttons"):
             yield Button("Install", variant="success", id="install")
-            yield Button("Remove", variant="error", id="remove")
+            yield Button("Uninstall", variant="error", id="remove")
             yield Button("Quit", variant="default", id="quit")
         yield Static("Status: detecting moleditpy executable…", id="status")
         yield RichLog(id="log", wrap=True, markup=False)
@@ -136,7 +135,7 @@ class InstallerApp(App):
     def on_mount(self) -> None:
         self.log_line("Welcome! Pick components, then press Install.")
         if platform.system() == "Windows":
-            self.log_line("Note: system-wide scope is not available on Windows.")
+            self.log_line("Note: system-wide scope needs an administrator terminal.")
         self.run_worker(self._detect_executable, thread=True)
 
     # ------------------------------------------------------------------ #
@@ -233,7 +232,8 @@ class InstallerApp(App):
         self._set_status("Removing…")
         self.run_worker(
             lambda: self._run_installer_action(
-                lambda: installer.remove_shortcut(system_scope=system_scope), "Remove"
+                lambda: installer.remove_shortcut(system_scope=system_scope),
+                "Uninstall",
             ),
             thread=True,
         )
