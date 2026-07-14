@@ -15,7 +15,7 @@ This package is a helper utility that automatically installs the correct version
     This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
 
 2.  **Run the interactive installer (TUI)**
-    Run the following command in your terminal. In an interactive terminal this opens a TUI (like `nmtui`) where you pick the components — Desktop shortcut, application-menu entry, `.pmeprj` file association — and the scope (per-user or system-wide), then press **Install**:
+    Run the following command in your terminal. In an interactive terminal this opens a TUI where you pick the components — Desktop shortcut, application-menu entry, `.pmeprj` file association — and the scope (per-user or system-wide), then press **Install**:
 
     ```bash
     moleditpy-installer
