@@ -1568,10 +1568,14 @@ class TestRefreshLaunchServices:
         app = tmp_path / "MoleditPy.app"
         app.mkdir()
 
-        with mock.patch("subprocess.run") as mock_run:
+        # Force the lsregister candidates to look absent (they really do
+        # exist on macOS CI runners, so this must be mocked explicitly).
+        with (
+            mock.patch("pathlib.Path.exists", return_value=False),
+            mock.patch("subprocess.run") as mock_run,
+        ):
             installer_main.refresh_launch_services(app)
 
-        # No lsregister on this machine's fake paths -> no subprocess call
         mock_run.assert_not_called()
 
 
