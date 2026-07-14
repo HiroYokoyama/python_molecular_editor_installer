@@ -67,6 +67,13 @@ If running on a Unix-like OS, the installer searches these directories:
    * `~/.poetry/bin`
    * `~/bin`
    * `~/.bin`
+9. **System-wide Conda Installations** (their `bin` plus `envs/*/bin`):
+   * `/opt/miniconda3` (macOS pkg-installer default)
+   * `/opt/anaconda3`
+   * `/opt/conda` (docker/miniforge convention)
+   * `/opt/homebrew/Caskroom/miniconda/base`
+   * `/usr/local/miniconda3`
+   * `/usr/local/anaconda3`
 
 ## 4. System PATH (All OS)
 As a final fallback, the installer checks the standard system `PATH` environment variable using `shutil.which`.
