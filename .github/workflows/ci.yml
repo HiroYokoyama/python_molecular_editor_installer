@@ -161,10 +161,11 @@ jobs:
           set -x
           moleditpy-installer --system
           reg query 'HKLM\Software\Classes\.pmeprj' //ve | grep -i 'MoleditPy.File'
-          test -f "$(cygpath "$PROGRAMDATA")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
-          test -f "$(cygpath "$PROGRAMDATA")/MoleditPy/installer/file_icon.ico"
+          PROGRAMDATA_DIR="${PROGRAMDATA:-${ProgramData:-C:/ProgramData}}"
+          test -f "$(cygpath "$PROGRAMDATA_DIR")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
+          test -f "$(cygpath "$PROGRAMDATA_DIR")/MoleditPy/installer/file_icon.ico"
           moleditpy-installer --uninstall --system
-          test ! -f "$(cygpath "$PROGRAMDATA")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
+          test ! -f "$(cygpath "$PROGRAMDATA_DIR")/Microsoft/Windows/Start Menu/Programs/MoleditPy.lnk"
           if reg query 'HKLM\Software\Classes\.pmeprj' //ve 2> /dev/null; then
             echo "HKLM .pmeprj association must be removed" && exit 1
           fi
