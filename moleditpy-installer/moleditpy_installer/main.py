@@ -12,6 +12,7 @@ import importlib.resources
 import os
 import platform
 import shutil
+import subprocess
 import sys
 import sysconfig
 from pathlib import Path
@@ -25,6 +26,36 @@ except ImportError:
 from pyshortcuts import make_shortcut
 
 
+def get_persistent_data_dir() -> Path:
+    """
+    Per-user directory for extracted installer assets (icons).
+
+    Shortcuts and registry entries reference these files long after the
+    installer exits, so they must not live in the system temp directory
+    (which is periodically cleaned, silently breaking the icons).
+    """
+    if platform.system() == "Windows":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        data_dir = Path(base) / "MoleditPy" / "installer"
+    else:
+        data_dir = Path.home() / ".moleditpy" / "installer"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+def _extract_data_file(file_name: str) -> Optional[str]:
+    """Extract a packaged data file to the persistent data dir and return its path."""
+    try:
+        ref = importlib.resources.files("moleditpy_installer") / "data" / file_name
+        content = ref.read_bytes()
+        out_path = get_persistent_data_dir() / file_name
+        out_path.write_bytes(content)
+        return str(out_path)
+    except Exception as e:
+        print(f"Error extracting data file {file_name}: {e}")
+        return None
+
+
 def get_icon_path() -> Optional[str]:
     """
     Gets the absolute path to the correct icon file based on the OS.
@@ -33,7 +64,6 @@ def get_icon_path() -> Optional[str]:
         Optional[str]: The path to the icon file, or None if not found or OS unsupported.
     """
     system = platform.system()
-    icon_name = ""
 
     if system == "Windows":
         icon_name = "icon.ico"
@@ -45,19 +75,7 @@ def get_icon_path() -> Optional[str]:
         print(f"Warning: Unsupported operating system for icon selection: {system}")
         return None
 
-    try:
-        import tempfile
-
-        ref = importlib.resources.files("moleditpy_installer") / "data" / icon_name
-        content = ref.read_bytes()
-        tmp_dir = Path(tempfile.gettempdir())
-        icon_path = tmp_dir / icon_name
-        icon_path.write_bytes(content)
-        return str(icon_path)
-
-    except Exception as e:
-        print(f"Error extracting icon file {icon_name}: {e}")
-        return None
+    return _extract_data_file(icon_name)
 
 
 def find_executable(name: str) -> Optional[str]:
@@ -376,10 +394,30 @@ def register_file_associations_darwin(app_path: Path) -> bool:
                 "CFBundleTypeName": "MoleditPy Project File",
                 "CFBundleTypeRole": "Editor",
                 "LSHandlerRank": "Owner",
+                "LSItemContentTypes": ["com.moleditpy.pmeprj"],
                 "CFBundleTypeIconFile": "applet.icns",
             }
             doc_types.append(new_doc_type)
             pl["CFBundleDocumentTypes"] = doc_types
+
+            # Export a UTI for .pmeprj: modern macOS binds document types
+            # through UTIs, and an unknown extension without one only gets
+            # a fragile dynamic UTI.
+            exported = pl.get("UTExportedTypeDeclarations", [])
+            if not any(
+                d.get("UTTypeIdentifier") == "com.moleditpy.pmeprj" for d in exported
+            ):
+                exported.append(
+                    {
+                        "UTTypeIdentifier": "com.moleditpy.pmeprj",
+                        "UTTypeDescription": "MoleditPy Project File",
+                        "UTTypeConformsTo": ["public.data"],
+                        "UTTypeTagSpecification": {
+                            "public.filename-extension": ["pmeprj"],
+                        },
+                    }
+                )
+                pl["UTExportedTypeDeclarations"] = exported
 
             with open(plist_path, "wb") as fp:
                 plistlib.dump(pl, fp)
@@ -461,14 +499,14 @@ def remove_shortcut() -> None:
     Removes the created shortcut and file associations (on Windows).
     """
     system = platform.system()
-    shortcut_path = None
+    shortcut_paths = []
     shortcut_name = "MoleditPy"
 
     if system == "Windows":
         # Usually in APPDATA/Microsoft/Windows/Start Menu/Programs
         appdata = os.environ.get("APPDATA")
         if appdata:
-            shortcut_path = (
+            shortcut_paths.append(
                 Path(appdata)
                 / "Microsoft"
                 / "Windows"
@@ -476,15 +514,18 @@ def remove_shortcut() -> None:
                 / "Programs"
                 / f"{shortcut_name}.lnk"
             )
+        # pyshortcuts also creates a Desktop shortcut
+        shortcut_paths.append(Path.home() / "Desktop" / f"{shortcut_name}.lnk")
 
         unregister_file_associations_windows()
 
     elif system == "Linux":
-        # Usually in ~/.local/share/applications/
+        # Usually in ~/.local/share/applications/ plus a Desktop copy
         home = Path.home()
-        shortcut_path = (
+        shortcut_paths.append(
             home / ".local" / "share" / "applications" / f"{shortcut_name}.desktop"
         )
+        shortcut_paths.append(home / "Desktop" / f"{shortcut_name}.desktop")
 
     elif system == "Darwin":
         home = Path.home()
@@ -513,17 +554,21 @@ def remove_shortcut() -> None:
         print(f"Removal not fully supported/automated for OS: {system}")
         return
 
-    if shortcut_path and shortcut_path.exists():
-        try:
-            if shortcut_path.is_dir():
-                shutil.rmtree(shortcut_path)
-            else:
-                os.remove(shortcut_path)
-            print(f"Removed shortcut: {shortcut_path}")
-        except OSError as e:
-            print(f"Failed to remove shortcut {shortcut_path}: {e}")
-    else:
-        print(f"Shortcut not found at expected location: {shortcut_path}")
+    removed_any = False
+    for shortcut_path in shortcut_paths:
+        if shortcut_path.exists():
+            try:
+                if shortcut_path.is_dir():
+                    shutil.rmtree(shortcut_path)
+                else:
+                    os.remove(shortcut_path)
+                print(f"Removed shortcut: {shortcut_path}")
+                removed_any = True
+            except OSError as e:
+                print(f"Failed to remove shortcut {shortcut_path}: {e}")
+
+    if not removed_any:
+        print("Shortcut not found at expected locations.")
 
 
 def get_file_icon_path() -> Optional[str]:
@@ -533,23 +578,114 @@ def get_file_icon_path() -> Optional[str]:
     if platform.system() != "Windows":
         return None
 
+    # Extract to a persistent location: as_file() paths may be temporary
+    # (zip installs) and would be dead by the time the registry reads them.
+    return _extract_data_file("file_icon.ico")
+
+
+def python_for_executable(exe_path: str) -> str:
+    """
+    Return the Python interpreter that owns *exe_path*'s environment.
+
+    A console script found on PATH may belong to a different environment
+    than the one running this installer (e.g. base conda vs an activated
+    env). Pairing such a script with sys.executable produces a launcher
+    that dies with "ModuleNotFoundError: No module named 'moleditpy'".
+    Prefer the interpreter sitting next to the script, then the script's
+    shebang, and only then fall back to sys.executable.
+    """
+    exe_dir = Path(exe_path).resolve().parent
+    for name in ("python3", "python"):
+        candidate = exe_dir / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
     try:
-        ref = (
-            importlib.resources.files("moleditpy_installer") / "data" / "file_icon.ico"
+        with open(exe_path, "rb") as fp:
+            first_line = fp.readline(512).decode("utf-8", "replace").strip()
+        if first_line.startswith("#!"):
+            shebang = first_line[2:].strip()
+            # Try the full remainder first (handles spaces in the path),
+            # then the first token (handles trailing flags like -sE).
+            for cand_str in (shebang, shebang.split()[0] if shebang else ""):
+                if not cand_str:
+                    continue
+                candidate = Path(cand_str)
+                if (
+                    candidate.name.startswith("python")
+                    and candidate.name != "env"
+                    and candidate.is_file()
+                    and os.access(candidate, os.X_OK)
+                ):
+                    return str(candidate)
+    except OSError:
+        pass
+
+    return sys.executable
+
+
+def verify_launch_command(python_path: str, exe_path: str) -> bool:
+    """
+    Best-effort check that ``python exe --version`` actually runs.
+
+    Catches environment mismatches at install time instead of leaving the
+    user with a shortcut that fails silently on double-click.
+    """
+    try:
+        result = subprocess.run(
+            [python_path, exe_path, "--version"],
+            capture_output=True,
+            timeout=60,
         )
-        with importlib.resources.as_file(ref) as path:
-            if path.exists():
-                return str(path)
-    except OSError as e:
-        print(f"Error finding file icon: {e}")
-
-    return None
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
-def install() -> None:
+def refresh_launch_services(app_path: Path) -> None:
+    """
+    Tell macOS Launch Services about a new/updated app bundle.
+
+    Without this, Finder keeps showing the stale default applet icon and
+    double-clicking .pmeprj files does not offer/launch the new app until
+    the user logs out or the LS database is rebuilt.
+    """
+    try:
+        os.utime(str(app_path), None)
+    except OSError:
+        pass
+
+    lsregister_candidates = [
+        Path(
+            "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+            "LaunchServices.framework/Support/lsregister"
+        ),
+        Path(
+            "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/"
+            "LaunchServices.framework/Versions/A/Support/lsregister"
+        ),
+    ]
+    for lsregister in lsregister_candidates:
+        if lsregister.exists():
+            try:
+                subprocess.run(
+                    [str(lsregister), "-f", str(app_path)],
+                    check=False,
+                    capture_output=True,
+                    timeout=60,
+                )
+            except Exception as e:
+                print(f"Warning: Launch Services refresh failed: {e}")
+            return
+
+
+def install() -> int:
     """
     Creates a shortcut for the installed moleditpy executable.
     Handles Conda environments by using 'conda run'.
+
+    Returns:
+        int: 0 on success, 1 on failure.
     """
     command_name = "moleditpy"
 
@@ -582,7 +718,7 @@ def install() -> None:
         print(f"Error: Command '{command_name}' (or 'moleditpy-linux') not found.")
         print("Please ensure the package is installed correctly and that")
         print("its Scripts/bin directory is accessible.")
-        return
+        return 1
 
     # Initialize shortcut variables
     target_script = ""
@@ -595,8 +731,16 @@ def install() -> None:
         # Target conda.exe instead of app
         target_script = conda_exe
 
-        # Command assembly: conda run -n myenv "C:\Path\To\moleditpy.exe"
-        target_args = f'run -n {conda_env} "{original_exe_path}"'
+        # Command assembly: conda run -p "C:\envs\myenv" "C:\Path\To\moleditpy.exe"
+        # Prefer the env prefix (-p): CONDA_DEFAULT_ENV may be a path for
+        # envs activated by path, in which case -n would not resolve.
+        # --no-capture-output keeps conda from buffering the GUI app's stdio.
+        conda_prefix = os.environ.get("CONDA_PREFIX")
+        if conda_prefix:
+            env_selector = f'-p "{conda_prefix}"'
+        else:
+            env_selector = f'-n "{conda_env}"'
+        target_args = f'run {env_selector} --no-capture-output "{original_exe_path}"'
 
     else:
         # Normal environment (pip install, etc.)
@@ -638,19 +782,37 @@ def install() -> None:
             target_app_name = f"{shortcut_name}.app"
             target_app_path = desktop_dir / target_app_name
 
-            # Ensure proper execution path
-            # On macOS, `conda run` inside AppleScript's `do shell script` often strips
-            # sys.path or fails to resolve editable pip installs.
-            # Bypassing it and explicitly using `sys.executable` guarantees that the exact
-            # Python interpreter which successfully ran the installer is used.
-            mac_target_script = sys.executable
-            mac_target_args = f'"{original_exe_path}"'
+            # Pair the found console script with the interpreter of its OWN
+            # environment. sys.executable (the installer's Python) may belong
+            # to a different env — that mismatch is what causes
+            # "ModuleNotFoundError: No module named 'moleditpy'" at launch.
+            mac_target_script = python_for_executable(original_exe_path)
 
-            applescript_escaped_args = mac_target_args.replace('"', '\\"')
+            if not verify_launch_command(mac_target_script, original_exe_path):
+                if mac_target_script != sys.executable and verify_launch_command(
+                    sys.executable, original_exe_path
+                ):
+                    mac_target_script = sys.executable
+                else:
+                    print(
+                        f'Warning: could not verify that "{mac_target_script}" '
+                        f'can launch "{original_exe_path}".'
+                    )
+                    print(
+                        "The shortcut may fail to open. If it does, re-run "
+                        "'moleditpy-installer' from the Python environment where "
+                        "moleditpy is installed (e.g. after 'conda activate <env>')."
+                    )
 
+            mac_escaped_script = mac_target_script.replace('"', '\\"')
+            applescript_escaped_args = f'"{original_exe_path}"'.replace('"', '\\"')
+
+            # Launch in the background (trailing '&') so the applet quits
+            # immediately instead of staying "running" (bouncing in the Dock)
+            # for the whole MoleditPy session.
             applescript_code = f"""
 on run
-    do shell script quoted form of "{mac_target_script}" & " {applescript_escaped_args}"
+    do shell script quoted form of "{mac_escaped_script}" & " {applescript_escaped_args} > /dev/null 2>&1 &"
 end run
 
 on open dropped_items
@@ -658,31 +820,36 @@ on open dropped_items
     repeat with dropped_item in dropped_items
         set arg_string to arg_string & " " & quoted form of POSIX path of dropped_item
     end repeat
-    do shell script quoted form of "{mac_target_script}" & " {applescript_escaped_args}" & arg_string
+    do shell script quoted form of "{mac_escaped_script}" & " {applescript_escaped_args}" & arg_string & " > /dev/null 2>&1 &"
 end open
 """
-            import subprocess
-
             try:
                 subprocess.run(
                     ["osacompile", "-o", str(target_app_path), "-e", applescript_code],
                     check=True,
                 )
 
+                # Give the bundle a stable identity: Launch Services needs a
+                # bundle identifier to bind document types (and the icon)
+                # reliably; osacompile applets ship without one.
+                plist_path = target_app_path / "Contents" / "Info.plist"
+                if plist_path.exists():
+                    import plistlib
+
+                    with open(plist_path, "rb") as fp:
+                        pl = plistlib.load(fp)
+                    pl["CFBundleIdentifier"] = "com.moleditpy.launcher"
+                    pl["CFBundleName"] = shortcut_name
+                    pl["CFBundleDisplayName"] = shortcut_name
+                    if icon_path and os.path.exists(icon_path):
+                        pl["CFBundleIconFile"] = "applet.icns"
+                    with open(plist_path, "wb") as fp:
+                        plistlib.dump(pl, fp)
+
                 if icon_path and os.path.exists(icon_path):
                     app_resources = target_app_path / "Contents" / "Resources"
                     app_resources.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(icon_path, app_resources / "applet.icns")
-
-                    plist_path = target_app_path / "Contents" / "Info.plist"
-                    if plist_path.exists():
-                        import plistlib
-
-                        with open(plist_path, "rb") as fp:
-                            pl = plistlib.load(fp)
-                        pl["CFBundleIconFile"] = "applet.icns"
-                        with open(plist_path, "wb") as fp:
-                            plistlib.dump(pl, fp)
 
                 register_file_associations_darwin(target_app_path)
 
@@ -697,21 +864,31 @@ end open
 
                 shutil.copytree(str(target_app_path), str(dest_app))
 
-                print("Created shortcut on ~/Applications and Desktop.")
+                # Refresh Launch Services so the custom icon and the .pmeprj
+                # association take effect immediately (no logout needed).
+                refresh_launch_services(dest_app)
+                refresh_launch_services(target_app_path)
+
+                print("Created shortcut in ~/Applications and on the Desktop.")
+                print("Double-clicking .pmeprj files will now open MoleditPy.")
                 print(
-                    "If you want to add to /Applications folder, please move the desktop one."
+                    "If you want it in the system /Applications folder, "
+                    "move the Desktop copy there."
                 )
             except Exception as e:
                 print(f"Failed to create macOS app bundle natively: {e}")
-                print("Created shortcut on Desktop.")
+                return 1
         else:
             print(f"Shortcut creation is not supported on this OS: {system}")
-            return
+            return 1
 
     except OSError as e:
         print(f"Failed to create shortcut: {e}")
+        return 1
 
-    # Register file associations on Windows
+    # Register file associations on Windows (.pmeprj only — .pmeraw is a
+    # pickle-based format and is intentionally NOT associated with
+    # double-click for safety).
     if system == "Windows" and original_exe_path:
         file_icon_path = get_file_icon_path()
         if not file_icon_path:
@@ -719,8 +896,9 @@ end open
 
         register_file_associations_windows(str(original_exe_path), file_icon_path)
 
-        print("\nYou can remove the shortcut and file associations by running:")
-        print("  moleditpy-installer --remove")
+    print("\nYou can remove the shortcut and file associations by running:")
+    print("  moleditpy-installer --remove")
+    return 0
 
 
 def get_installer_version() -> str:
@@ -795,8 +973,7 @@ def main() -> int:
         )
         return 1
 
-    install()
-    return 0
+    return install()
 
 
 if __name__ == "__main__":

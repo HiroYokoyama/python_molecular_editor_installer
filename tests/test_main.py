@@ -582,18 +582,33 @@ class TestFindExecutable:
 
 
 class TestGetIconPath:
-    def test_returns_path_on_windows(self):
-        with mock.patch("platform.system", return_value="Windows"):
+    def test_returns_path_on_windows(self, tmp_path):
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch.object(
+                installer_main, "get_persistent_data_dir", return_value=tmp_path
+            ),
+        ):
             path = installer_main.get_icon_path()
         assert path is None or path.endswith(".ico")
 
-    def test_returns_path_on_linux(self):
-        with mock.patch("platform.system", return_value="Linux"):
+    def test_returns_path_on_linux(self, tmp_path):
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main, "get_persistent_data_dir", return_value=tmp_path
+            ),
+        ):
             path = installer_main.get_icon_path()
         assert path is None or path.endswith(".png")
 
-    def test_returns_path_on_darwin(self):
-        with mock.patch("platform.system", return_value="Darwin"):
+    def test_returns_path_on_darwin(self, tmp_path):
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch.object(
+                installer_main, "get_persistent_data_dir", return_value=tmp_path
+            ),
+        ):
             path = installer_main.get_icon_path()
         assert path is None or path.endswith(".icns")
 
@@ -639,23 +654,24 @@ class TestGetFileIconPath:
         with mock.patch("platform.system", return_value="Linux"):
             assert installer_main.get_file_icon_path() is None
 
-    def test_returns_path_on_windows_when_file_exists(self, tmp_path):
-        fake_icon = tmp_path / "file_icon.ico"
-        fake_icon.write_bytes(b"")
-
+    def test_returns_persistent_path_on_windows(self, tmp_path):
+        """The icon must be extracted to a persistent dir (not %TEMP%),
+        because the registry references it long after install."""
         fake_ref = mock.MagicMock()
         fake_ref.__truediv__ = mock.Mock(return_value=fake_ref)
+        fake_ref.read_bytes = mock.Mock(return_value=b"icon-bytes")
 
         with (
             mock.patch("platform.system", return_value="Windows"),
             mock.patch("importlib.resources.files", return_value=fake_ref),
-            mock.patch("importlib.resources.as_file") as mock_as_file,
+            mock.patch.object(
+                installer_main, "get_persistent_data_dir", return_value=tmp_path
+            ),
         ):
-            mock_as_file.return_value.__enter__ = mock.Mock(return_value=fake_icon)
-            mock_as_file.return_value.__exit__ = mock.Mock(return_value=False)
             path = installer_main.get_file_icon_path()
 
-        assert path == str(fake_icon)
+        assert path == str(tmp_path / "file_icon.ico")
+        assert (tmp_path / "file_icon.ico").read_bytes() == b"icon-bytes"
 
     def test_returns_none_when_resource_raises(self):
         with (
@@ -915,7 +931,12 @@ class TestRemoveShortcut:
         ):
             installer_main.remove_shortcut()
 
-        mock_rm.assert_called_once()
+        # Both the Start Menu and the Desktop shortcuts must be removed
+        # (pyshortcuts creates both at install time).
+        assert mock_rm.call_count == 2
+        removed = {str(c.args[0]) for c in mock_rm.call_args_list}
+        assert any("Start Menu" in p for p in removed)
+        assert any("Desktop" in p for p in removed)
 
     def test_removes_desktop_file_on_linux(self, tmp_path):
         apps_dir = tmp_path / ".local" / "share" / "applications"
@@ -1043,6 +1064,13 @@ class TestInstall:
         with (
             mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
             mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=sys.executable
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=True
+            ),
+            mock.patch.object(installer_main, "refresh_launch_services"),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("subprocess.run") as mock_run,
             mock.patch("shutil.copytree"),
@@ -1056,13 +1084,79 @@ class TestInstall:
         args = mock_run.call_args[0][0]
         assert args[0] == "osacompile"
         assert "-e" in args
-        # Check that the AppleScript includes the "on open" handler
+        # The AppleScript must have the "on open" handler for double-clicked
+        # files and launch in the background so the applet quits immediately.
         applescript_idx = args.index("-e") + 1
-        assert "on open dropped_items" in args[applescript_idx]
+        applescript = args[applescript_idx]
+        assert "on open dropped_items" in applescript
+        assert "2>&1 &" in applescript
+
+    def test_install_darwin_uses_env_of_found_executable(self, tmp_path):
+        """The launcher must use the found script's own interpreter, not
+        blindly sys.executable — mismatched envs cause ModuleNotFoundError."""
+        fake_exe = str(tmp_path / "moleditpy")
+        env_python = str(tmp_path / "envbin" / "python3")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=env_python
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=True
+            ) as mock_verify,
+            mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("subprocess.run") as mock_run,
+            mock.patch("shutil.copytree"),
+            mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install()
+
+        mock_verify.assert_called_once_with(env_python, fake_exe)
+        args = mock_run.call_args[0][0]
+        applescript = args[args.index("-e") + 1]
+        assert env_python in applescript
+
+    def test_install_darwin_falls_back_to_sys_executable(self, tmp_path):
+        """If the paired interpreter cannot launch moleditpy but
+        sys.executable can, the launcher uses sys.executable."""
+        fake_exe = str(tmp_path / "moleditpy")
+        bad_python = str(tmp_path / "badbin" / "python3")
+
+        def fake_verify(python_path, exe_path):
+            return python_path == sys.executable
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=bad_python
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", side_effect=fake_verify
+            ),
+            mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("subprocess.run") as mock_run,
+            mock.patch("shutil.copytree"),
+            mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install()
+
+        args = mock_run.call_args[0][0]
+        applescript = args[args.index("-e") + 1]
+        assert sys.executable in applescript
+        assert bad_python not in applescript
 
     def test_install_darwin_copies_app_to_applications(self, tmp_path):
         fake_exe = str(tmp_path / "moleditpy")
-        
+
         def mock_subprocess_run(*args, **kwargs):
             # Simulate osacompile creating the target app directory
             app_path = args[0][2]
@@ -1071,6 +1165,13 @@ class TestInstall:
         with (
             mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
             mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=sys.executable
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=True
+            ),
+            mock.patch.object(installer_main, "refresh_launch_services"),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("subprocess.run", side_effect=mock_subprocess_run),
             mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
@@ -1146,7 +1247,40 @@ class TestInstall:
             mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
         )
         assert fake_conda in script_arg
-        assert "run -n base" in script_arg
+        assert 'run -n "base"' in script_arg
+        assert "--no-capture-output" in script_arg
+
+    def test_install_prefers_conda_prefix_over_env_name(self, tmp_path):
+        """CONDA_PREFIX (-p) is preferred: CONDA_DEFAULT_ENV may be a path
+        for envs activated by path, where -n would not resolve."""
+        fake_exe = str(tmp_path / "moleditpy.exe")
+        fake_conda = str(tmp_path / "conda.exe")
+        fake_prefix = str(tmp_path / "envs" / "myenv")
+
+        env = {
+            "CONDA_DEFAULT_ENV": "myenv",
+            "CONDA_EXE": fake_conda,
+            "CONDA_PREFIX": fake_prefix,
+        }
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "get_file_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "register_file_associations_windows", return_value=True
+            ),
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            installer_main.install()
+
+        script_arg = (
+            mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
+        )
+        assert f'run -p "{fake_prefix}"' in script_arg
+        assert "--no-capture-output" in script_arg
 
     def test_install_falls_back_to_moleditpy_linux(self, tmp_path):
         """On Linux, if 'moleditpy' is not found, 'moleditpy-linux' is tried."""
@@ -1197,12 +1331,21 @@ class TestInstall:
 class TestMainCLI:
     def test_main_calls_install_by_default(self):
         with (
-            mock.patch.object(installer_main, "install") as mock_install,
+            mock.patch.object(
+                installer_main, "install", return_value=0
+            ) as mock_install,
             mock.patch("sys.argv", ["moleditpy-installer"]),
         ):
             result = installer_main.main()
         mock_install.assert_called_once()
         assert result == 0
+
+    def test_main_propagates_install_failure(self):
+        with (
+            mock.patch.object(installer_main, "install", return_value=1),
+            mock.patch("sys.argv", ["moleditpy-installer"]),
+        ):
+            assert installer_main.main() == 1
 
     def test_main_calls_remove_shortcut_with_flag(self):
         with (
@@ -1320,3 +1463,147 @@ def test_package_runnable_as_module():
 
     mod = importlib.import_module("moleditpy_installer.__main__")
     assert mod is not None
+
+
+# ---------------------------------------------------------------------------
+# python_for_executable
+# ---------------------------------------------------------------------------
+
+
+class TestPythonForExecutable:
+    @staticmethod
+    def _make_unix_exe(directory: Path, name: str) -> Path:
+        """Create an executable with an exact (extension-less, Unix) name."""
+        path = directory / name
+        path.write_bytes(b"")
+        path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        return path
+
+    def test_prefers_python3_next_to_script(self, tmp_path):
+        exe = self._make_unix_exe(tmp_path, "moleditpy")
+        py3 = self._make_unix_exe(tmp_path, "python3")
+        self._make_unix_exe(tmp_path, "python")
+
+        result = installer_main.python_for_executable(str(exe))
+        assert result == str(py3)
+
+    def test_uses_python_when_no_python3(self, tmp_path):
+        exe = self._make_unix_exe(tmp_path, "moleditpy")
+        py = self._make_unix_exe(tmp_path, "python")
+
+        result = installer_main.python_for_executable(str(exe))
+        assert result == str(py)
+
+    def test_uses_shebang_when_no_adjacent_python(self, tmp_path):
+        env_bin = tmp_path / "env" / "bin"
+        env_bin.mkdir(parents=True)
+        shebang_py = _make_fake_exe(env_bin, "python3.12")
+
+        exe = tmp_path / "moleditpy"
+        exe.write_text(f"#!{shebang_py}\nimport moleditpy\n")
+
+        result = installer_main.python_for_executable(str(exe))
+        assert result == str(shebang_py)
+
+    def test_ignores_env_shebang(self, tmp_path):
+        exe = tmp_path / "moleditpy"
+        exe.write_text("#!/usr/bin/env python3\nimport moleditpy\n")
+
+        result = installer_main.python_for_executable(str(exe))
+        assert result == sys.executable
+
+    def test_falls_back_to_sys_executable(self, tmp_path):
+        exe = tmp_path / "moleditpy"
+        exe.write_bytes(b"MZ binary launcher")
+
+        result = installer_main.python_for_executable(str(exe))
+        assert result == sys.executable
+
+
+# ---------------------------------------------------------------------------
+# verify_launch_command
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyLaunchCommand:
+    def test_returns_true_on_zero_exit(self):
+        fake_result = mock.Mock(returncode=0)
+        with mock.patch("subprocess.run", return_value=fake_result) as mock_run:
+            assert installer_main.verify_launch_command("/py", "/exe") is True
+        assert mock_run.call_args[0][0] == ["/py", "/exe", "--version"]
+
+    def test_returns_false_on_nonzero_exit(self):
+        fake_result = mock.Mock(returncode=1)
+        with mock.patch("subprocess.run", return_value=fake_result):
+            assert installer_main.verify_launch_command("/py", "/exe") is False
+
+    def test_returns_false_on_exception(self):
+        with mock.patch("subprocess.run", side_effect=OSError("no such file")):
+            assert installer_main.verify_launch_command("/py", "/exe") is False
+
+
+# ---------------------------------------------------------------------------
+# refresh_launch_services
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshLaunchServices:
+    def test_calls_lsregister_when_present(self, tmp_path):
+        app = tmp_path / "MoleditPy.app"
+        app.mkdir()
+
+        with (
+            mock.patch("pathlib.Path.exists", return_value=True),
+            mock.patch("subprocess.run") as mock_run,
+        ):
+            installer_main.refresh_launch_services(app)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0].endswith("lsregister")
+        assert cmd[1] == "-f"
+        assert cmd[2] == str(app)
+
+    def test_silent_when_lsregister_missing(self, tmp_path):
+        app = tmp_path / "MoleditPy.app"
+        app.mkdir()
+
+        with mock.patch("subprocess.run") as mock_run:
+            installer_main.refresh_launch_services(app)
+
+        # No lsregister on this machine's fake paths -> no subprocess call
+        mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# UTI declaration (macOS document binding)
+# ---------------------------------------------------------------------------
+
+
+class TestDarwinUTIDeclaration:
+    def test_exports_pmeprj_uti(self, tmp_path):
+        import plistlib
+
+        app_path = tmp_path / "MoleditPy.app"
+        contents_path = app_path / "Contents"
+        contents_path.mkdir(parents=True)
+        plist_path = contents_path / "Info.plist"
+        with open(plist_path, "wb") as fp:
+            plistlib.dump({"CFBundleIdentifier": "com.moleditpy.launcher"}, fp)
+
+        with mock.patch("platform.system", return_value="Darwin"):
+            result = installer_main.register_file_associations_darwin(app_path)
+
+        assert result is True
+        with open(plist_path, "rb") as fp:
+            pl = plistlib.load(fp)
+
+        doc_types = pl["CFBundleDocumentTypes"]
+        assert doc_types[0]["CFBundleTypeExtensions"] == ["pmeprj"]
+        assert doc_types[0]["LSItemContentTypes"] == ["com.moleditpy.pmeprj"]
+
+        exported = pl["UTExportedTypeDeclarations"]
+        assert exported[0]["UTTypeIdentifier"] == "com.moleditpy.pmeprj"
+        assert exported[0]["UTTypeTagSpecification"]["public.filename-extension"] == [
+            "pmeprj"
+        ]
