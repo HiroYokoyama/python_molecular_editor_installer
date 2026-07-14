@@ -967,7 +967,7 @@ class TestInstall:
         _, kwargs = mock_shortcut.call_args
         assert kwargs.get("desktop") is True
 
-    def test_install_darwin_moves_app_to_applications(self, tmp_path):
+    def test_install_darwin_copies_app_to_applications(self, tmp_path):
         fake_exe = str(tmp_path / "moleditpy")
         desktop_dir = tmp_path / "Desktop"
         desktop_dir.mkdir()
@@ -992,7 +992,7 @@ class TestInstall:
             installer_main.install()
 
         mock_shortcut.assert_called_once()
-        assert not fake_app.exists()
+        assert fake_app.exists()
         assert (tmp_path / "Applications" / "MoleditPy.app").exists()
 
     def test_install_unsupported_os(self, tmp_path, capsys):

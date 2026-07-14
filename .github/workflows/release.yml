@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
@@ -20,8 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      APP_VERSION: ${{ inputs.version }}
 
     steps:
       - name: Checkout Code
@@ -29,7 +30,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set APP_VERSION
+        id: set_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "APP_VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+          fi
+
       - name: Validate Release Version
+        if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ github.ref_name }}" != "main" ]; then
             echo "Releases must be run from the main branch."
@@ -63,6 +75,7 @@ jobs:
           python -m pytest tests/ -v
 
       - name: Update Package Version
+        if: github.event_name == 'workflow_dispatch'
         shell: python
         run: |
           import os
@@ -94,6 +107,7 @@ jobs:
           path: dist/*
 
       - name: Commit and Push Release Tag
+        if: github.event_name == 'workflow_dispatch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -109,8 +123,6 @@ jobs:
     permissions:
       id-token: write
       contents: write
-    env:
-      APP_VERSION: ${{ inputs.version }}
 
     steps:
       - name: Download Artifacts
@@ -127,7 +139,13 @@ jobs:
       - name: Detect Pre-release
         id: prerelease_check
         run: |
-          if echo "$APP_VERSION" | grep -qE '[a-zA-Z]'; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          
+          if echo "$VERSION" | grep -qE '[a-zA-Z]'; then
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
           else
             echo "is_prerelease=false" >> $GITHUB_OUTPUT

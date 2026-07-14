@@ -424,11 +424,27 @@ def remove_shortcut() -> None:
         )
 
     elif system == "Darwin":
-        # Check ~/Applications first, then fallback to ~/Desktop
         home = Path.home()
-        shortcut_path = home / "Applications" / f"{shortcut_name}.app"
-        if not shortcut_path.exists():
-            shortcut_path = home / "Desktop" / f"{shortcut_name}.app"
+        paths_to_remove = [
+            home / "Applications" / f"{shortcut_name}.app",
+            home / "Desktop" / f"{shortcut_name}.app",
+        ]
+        removed_any = False
+        for path in paths_to_remove:
+            if path.exists():
+                try:
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                    print(f"Removed shortcut: {path}")
+                    removed_any = True
+                except OSError as e:
+                    print(f"Failed to remove shortcut {path}: {e}")
+
+        if not removed_any:
+            print("Shortcut not found at expected locations on macOS.")
+        return
 
     else:
         print(f"Removal not fully supported/automated for OS: {system}")
@@ -561,6 +577,7 @@ def install() -> None:
                 terminal=True,  # Keep terminal for stdout/stderr if needed
                 noexe=True,
             )
+
             if scut is not None:
                 desktop_dir = getattr(scut, "desktop_dir", None)
                 target = getattr(scut, "target", None)
@@ -569,6 +586,7 @@ def install() -> None:
                 ):
                     src_app = Path(desktop_dir) / target
                     dest_dir = Path.home() / "Applications"
+
                     if src_app.exists():
                         try:
                             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -578,23 +596,36 @@ def install() -> None:
                                     shutil.rmtree(dest_app)
                                 else:
                                     os.remove(dest_app)
-                            shutil.move(str(src_app), str(dest_app))
+
+                            shutil.copytree(str(src_app), str(dest_app))
+
+                            print("Created shortcut on ~/Applications and Desktop.")
                             print(
-                                f"Successfully created '{shortcut_name}' in {dest_app}."
+                                "If you want to add to /Applications folder, please move the desktop one."
                             )
                         except Exception as e:
                             print(
-                                f"Warning: Failed to move application bundle to {dest_dir}: {e}"
+                                f"Warning: Failed to copy application bundle to {dest_dir}: {e}"
                             )
-                            print(f"The application bundle remains at {src_app}.")
+                            print("Created shortcut on Desktop.")
+                            print(
+                                "If you want to add to /Applications folder, please move the desktop one."
+                            )
                     else:
+                        print("Created shortcut on Desktop.")
                         print(
-                            f"Warning: Expected application bundle at {src_app} was not found."
+                            "If you want to add to /Applications folder, please move the desktop one."
                         )
                 else:
-                    print(f"Successfully created '{shortcut_name}' shortcut.")
+                    print("Created shortcut on Desktop.")
+                    print(
+                        "If you want to add to /Applications folder, please move the desktop one."
+                    )
             else:
-                print(f"Successfully created '{shortcut_name}' shortcut.")
+                print("Created shortcut on Desktop.")
+                print(
+                    "If you want to add to /Applications folder, please move the desktop one."
+                )
         else:
             print(f"Shortcut creation is not supported on this OS: {system}")
             return
