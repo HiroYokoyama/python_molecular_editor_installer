@@ -918,6 +918,17 @@ class TestUnregisterFileAssociationsWindows:
 
 
 class TestRemoveShortcut:
+    @pytest.fixture(autouse=True)
+    def _isolate_persistent_dir(self, tmp_path):
+        """remove_shortcut() deletes the persistent icon dir — keep the
+        tests away from the real one."""
+        with mock.patch.object(
+            installer_main,
+            "get_persistent_data_dir",
+            return_value=tmp_path / "persistent",
+        ):
+            yield
+
     def test_removes_lnk_on_windows(self, tmp_path):
         lnk = tmp_path / "MoleditPy.lnk"
         lnk.write_bytes(b"")
@@ -975,6 +986,34 @@ class TestRemoveShortcut:
             installer_main.remove_shortcut()
 
         assert not app_bundle.exists()
+
+    def test_darwin_remove_unregisters_launch_services(self, tmp_path):
+        """A deleted bundle must be dropped from the LS database, or it
+        keeps claiming .pmeprj files."""
+        app_bundle = tmp_path / "Applications" / "MoleditPy.app"
+        app_bundle.mkdir(parents=True)
+
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.object(installer_main, "refresh_launch_services") as mock_ls,
+        ):
+            installer_main.remove_shortcut()
+
+        mock_ls.assert_called_once_with(app_bundle, unregister=True)
+
+    def test_remove_cleans_persistent_icon_dir(self, tmp_path):
+        persistent = tmp_path / "persistent"
+        persistent.mkdir()
+        (persistent / "icon.ico").write_bytes(b"x")
+
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            installer_main.remove_shortcut()
+
+        assert not persistent.exists()
 
     def test_prints_message_when_shortcut_missing(self, capsys):
         with (
@@ -1071,6 +1110,7 @@ class TestInstall:
                 installer_main, "verify_launch_command", return_value=True
             ),
             mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(installer_main, "codesign_app"),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("subprocess.run") as mock_run,
             mock.patch("shutil.copytree"),
@@ -1085,11 +1125,12 @@ class TestInstall:
         assert args[0] == "osacompile"
         assert "-e" in args
         # The AppleScript must have the "on open" handler for double-clicked
-        # files and launch in the background so the applet quits immediately.
+        # files and run MoleditPy inside Terminal so output stays visible.
         applescript_idx = args.index("-e") + 1
         applescript = args[applescript_idx]
         assert "on open dropped_items" in applescript
-        assert "2>&1 &" in applescript
+        assert 'tell application "Terminal"' in applescript
+        assert "do script" in applescript
 
     def test_install_darwin_uses_env_of_found_executable(self, tmp_path):
         """The launcher must use the found script's own interpreter, not
@@ -1107,6 +1148,7 @@ class TestInstall:
                 installer_main, "verify_launch_command", return_value=True
             ) as mock_verify,
             mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(installer_main, "codesign_app"),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("subprocess.run") as mock_run,
             mock.patch("shutil.copytree"),
@@ -1140,6 +1182,7 @@ class TestInstall:
                 installer_main, "verify_launch_command", side_effect=fake_verify
             ),
             mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(installer_main, "codesign_app"),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("subprocess.run") as mock_run,
             mock.patch("shutil.copytree"),
@@ -1172,6 +1215,7 @@ class TestInstall:
                 installer_main, "verify_launch_command", return_value=True
             ),
             mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(installer_main, "codesign_app"),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("subprocess.run", side_effect=mock_subprocess_run),
             mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
@@ -1361,12 +1405,12 @@ class TestMainCLI:
         with mock.patch("importlib.metadata.version", return_value="2.0.0"):
             assert installer_main.get_installer_version() == "2.0.0"
 
-        # Test default fallback when package not installed
+        # Last-resort fallback must not claim a concrete (stale) version
         with (
             mock.patch("importlib.metadata.version", side_effect=Exception),
             mock.patch("pathlib.Path.exists", return_value=False),
         ):
-            assert installer_main.get_installer_version() == "1.5.0"
+            assert installer_main.get_installer_version() == "unknown"
 
     def test_get_installer_version_from_pyproject(self):
         # Test reading from pyproject.toml when metadata fails
@@ -1611,3 +1655,76 @@ class TestDarwinUTIDeclaration:
         assert exported[0]["UTTypeTagSpecification"]["public.filename-extension"] == [
             "pmeprj"
         ]
+
+
+# ---------------------------------------------------------------------------
+# codesign_app
+# ---------------------------------------------------------------------------
+
+
+class TestCodesignApp:
+    def test_ad_hoc_signs_bundle(self, tmp_path):
+        app = tmp_path / "MoleditPy.app"
+        app.mkdir()
+
+        fake_result = mock.Mock(returncode=0, stderr=b"")
+        with mock.patch("subprocess.run", return_value=fake_result) as mock_run:
+            installer_main.codesign_app(app)
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "codesign"
+        assert "--force" in cmd
+        assert "-" in cmd  # ad-hoc identity
+        assert cmd[-1] == str(app)
+
+    def test_warns_on_failure(self, tmp_path, capsys):
+        app = tmp_path / "MoleditPy.app"
+        app.mkdir()
+
+        fake_result = mock.Mock(returncode=1, stderr=b"sign error")
+        with mock.patch("subprocess.run", return_value=fake_result):
+            installer_main.codesign_app(app)
+
+        assert "codesign failed" in capsys.readouterr().out
+
+    def test_survives_missing_codesign(self, tmp_path, capsys):
+        app = tmp_path / "MoleditPy.app"
+        app.mkdir()
+
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError("codesign")):
+            installer_main.codesign_app(app)
+
+        assert "could not re-sign" in capsys.readouterr().out
+
+    def test_install_darwin_signs_both_copies(self, tmp_path):
+        """The bundle is modified after osacompile, so BOTH the Desktop and
+        ~/Applications copies must be re-signed or Apple Silicon refuses to
+        launch them (silently) and ignores their icon."""
+        fake_exe = str(tmp_path / "moleditpy")
+
+        def mock_subprocess_run(*args, **kwargs):
+            os.makedirs(args[0][2], exist_ok=True)
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=sys.executable
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=True
+            ),
+            mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(installer_main, "codesign_app") as mock_sign,
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("subprocess.run", side_effect=mock_subprocess_run),
+            mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install()
+
+        signed = [str(c.args[0]) for c in mock_sign.call_args_list]
+        assert len(signed) == 2
+        assert str(tmp_path / "Desktop" / "MoleditPy.app") in signed
+        assert str(tmp_path / "Applications" / "MoleditPy.app") in signed

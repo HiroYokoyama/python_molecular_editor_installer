@@ -11,6 +11,7 @@ import argparse
 import importlib.resources
 import os
 import platform
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -372,8 +373,6 @@ def register_file_associations_darwin(app_path: Path) -> bool:
         print(f"Warning: Info.plist not found at {plist_path}")
         return False
 
-    import plistlib
-
     try:
         with open(plist_path, "rb") as fp:
             pl = plistlib.load(fp)
@@ -529,26 +528,8 @@ def remove_shortcut() -> None:
 
     elif system == "Darwin":
         home = Path.home()
-        paths_to_remove = [
-            home / "Applications" / f"{shortcut_name}.app",
-            home / "Desktop" / f"{shortcut_name}.app",
-        ]
-        removed_any = False
-        for path in paths_to_remove:
-            if path.exists():
-                try:
-                    if path.is_dir():
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
-                    print(f"Removed shortcut: {path}")
-                    removed_any = True
-                except OSError as e:
-                    print(f"Failed to remove shortcut {path}: {e}")
-
-        if not removed_any:
-            print("Shortcut not found at expected locations on macOS.")
-        return
+        shortcut_paths.append(home / "Applications" / f"{shortcut_name}.app")
+        shortcut_paths.append(home / "Desktop" / f"{shortcut_name}.app")
 
     else:
         print(f"Removal not fully supported/automated for OS: {system}")
@@ -558,6 +539,10 @@ def remove_shortcut() -> None:
     for shortcut_path in shortcut_paths:
         if shortcut_path.exists():
             try:
+                # Drop the bundle from the Launch Services database first,
+                # or the deleted app keeps claiming .pmeprj files.
+                if system == "Darwin":
+                    refresh_launch_services(shortcut_path, unregister=True)
                 if shortcut_path.is_dir():
                     shutil.rmtree(shortcut_path)
                 else:
@@ -569,6 +554,12 @@ def remove_shortcut() -> None:
 
     if not removed_any:
         print("Shortcut not found at expected locations.")
+
+    # Clean up the icons extracted at install time
+    try:
+        shutil.rmtree(get_persistent_data_dir(), ignore_errors=True)
+    except OSError:
+        pass
 
 
 def get_file_icon_path() -> Optional[str]:
@@ -642,18 +633,43 @@ def verify_launch_command(python_path: str, exe_path: str) -> bool:
         return False
 
 
-def refresh_launch_services(app_path: Path) -> None:
+def codesign_app(app_path: Path) -> None:
     """
-    Tell macOS Launch Services about a new/updated app bundle.
+    Ad-hoc re-sign a modified app bundle.
+
+    osacompile produces a signed applet; editing its Info.plist or swapping
+    applet.icns invalidates that signature. Apple Silicon Macs then refuse
+    to launch the app — silently, when double-clicked in Finder — and
+    Launch Services ignores its icon and document types.
+    """
+    try:
+        result = subprocess.run(
+            ["codesign", "--force", "--deep", "--sign", "-", str(app_path)],
+            capture_output=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace").strip()
+            print(f"Warning: codesign failed: {stderr}")
+    except Exception as e:
+        print(f"Warning: could not re-sign app bundle: {e}")
+
+
+def refresh_launch_services(app_path: Path, unregister: bool = False) -> None:
+    """
+    Tell macOS Launch Services about a new/updated (or removed) app bundle.
 
     Without this, Finder keeps showing the stale default applet icon and
     double-clicking .pmeprj files does not offer/launch the new app until
-    the user logs out or the LS database is rebuilt.
+    the user logs out or the LS database is rebuilt. With ``unregister=True``
+    the bundle is dropped from the LS database instead (used before removal,
+    so a deleted app does not keep claiming .pmeprj).
     """
-    try:
-        os.utime(str(app_path), None)
-    except OSError:
-        pass
+    if not unregister:
+        try:
+            os.utime(str(app_path), None)
+        except OSError:
+            pass
 
     lsregister_candidates = [
         Path(
@@ -669,7 +685,7 @@ def refresh_launch_services(app_path: Path) -> None:
         if lsregister.exists():
             try:
                 subprocess.run(
-                    [str(lsregister), "-f", str(app_path)],
+                    [str(lsregister), "-u" if unregister else "-f", str(app_path)],
                     check=False,
                     capture_output=True,
                     timeout=60,
@@ -719,10 +735,6 @@ def install() -> int:
         print("Please ensure the package is installed correctly and that")
         print("its Scripts/bin directory is accessible.")
         return 1
-
-    # Initialize shortcut variables
-    target_script = ""
-    target_args = ""
 
     # If Conda environment
     if conda_env and conda_exe:
@@ -807,12 +819,22 @@ def install() -> int:
             mac_escaped_script = mac_target_script.replace('"', '\\"')
             applescript_escaped_args = f'"{original_exe_path}"'.replace('"', '\\"')
 
-            # Launch in the background (trailing '&') so the applet quits
-            # immediately instead of staying "running" (bouncing in the Dock)
-            # for the whole MoleditPy session.
+            # Run MoleditPy inside a Terminal window so Python output and
+            # errors are visible to the user (a silent GUI launch hides
+            # failures like a broken environment completely). "do script"
+            # returns immediately, so the applet quits right away instead of
+            # staying "running" in the Dock for the whole session.
             applescript_code = f"""
+on launch_moleditpy(extra_args)
+    set base_cmd to quoted form of "{mac_escaped_script}" & " {applescript_escaped_args}"
+    tell application "Terminal"
+        activate
+        do script base_cmd & extra_args
+    end tell
+end launch_moleditpy
+
 on run
-    do shell script quoted form of "{mac_escaped_script}" & " {applescript_escaped_args} > /dev/null 2>&1 &"
+    my launch_moleditpy("")
 end run
 
 on open dropped_items
@@ -820,7 +842,7 @@ on open dropped_items
     repeat with dropped_item in dropped_items
         set arg_string to arg_string & " " & quoted form of POSIX path of dropped_item
     end repeat
-    do shell script quoted form of "{mac_escaped_script}" & " {applescript_escaped_args}" & arg_string & " > /dev/null 2>&1 &"
+    my launch_moleditpy(arg_string)
 end open
 """
             try:
@@ -834,13 +856,17 @@ end open
                 # reliably; osacompile applets ship without one.
                 plist_path = target_app_path / "Contents" / "Info.plist"
                 if plist_path.exists():
-                    import plistlib
-
                     with open(plist_path, "rb") as fp:
                         pl = plistlib.load(fp)
                     pl["CFBundleIdentifier"] = "com.moleditpy.launcher"
                     pl["CFBundleName"] = shortcut_name
                     pl["CFBundleDisplayName"] = shortcut_name
+                    # Shown in the one-time macOS consent prompt when the
+                    # launcher first opens Terminal via Apple events.
+                    pl["NSAppleEventsUsageDescription"] = (
+                        "MoleditPy launcher opens Terminal to run MoleditPy "
+                        "so that output and errors are visible."
+                    )
                     if icon_path and os.path.exists(icon_path):
                         pl["CFBundleIconFile"] = "applet.icns"
                     with open(plist_path, "wb") as fp:
@@ -853,6 +879,10 @@ end open
 
                 register_file_associations_darwin(target_app_path)
 
+                # Re-sign AFTER all bundle modifications, or Apple Silicon
+                # refuses to launch the app (silently from Finder).
+                codesign_app(target_app_path)
+
                 dest_dir = Path.home() / "Applications"
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_app = dest_dir / target_app_name
@@ -862,7 +892,8 @@ end open
                     else:
                         os.remove(dest_app)
 
-                shutil.copytree(str(target_app_path), str(dest_app))
+                shutil.copytree(str(target_app_path), str(dest_app), symlinks=True)
+                codesign_app(dest_app)
 
                 # Refresh Launch Services so the custom icon and the .pmeprj
                 # association take effect immediately (no logout needed).
@@ -922,7 +953,7 @@ def get_installer_version() -> str:
     except Exception:
         pass
 
-    return "1.5.0"  # Fallback
+    return "unknown"
 
 
 def main() -> int:
