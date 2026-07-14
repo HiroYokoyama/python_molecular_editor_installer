@@ -176,6 +176,8 @@ class InstallerApp(App):
             self.log_line,
             f"--- {description} {'finished' if ok else 'FAILED'} ---",
         )
+        # Quit propagates the last action's outcome as the exit code
+        self.call_from_thread(setattr, self, "exit_code", 0 if ok else 1)
         self.call_from_thread(self._set_busy, False)
 
     # ------------------------------------------------------------------ #

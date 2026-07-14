@@ -321,7 +321,7 @@ class TestFindExecutable:
             ),
             mock.patch("shutil.which", return_value=None),
             mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}, clear=False),
-            mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
+            mock.patch("sysconfig.get_path", side_effect=KeyError("mocked error")),
         ):
             _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
@@ -347,7 +347,7 @@ class TestFindExecutable:
             ),
             mock.patch("shutil.which", return_value=None),
             mock.patch.dict(os.environ, {"APPDATA": str(tmp_path)}, clear=False),
-            mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
+            mock.patch("sysconfig.get_path", side_effect=KeyError("mocked error")),
         ):
             _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
@@ -373,7 +373,7 @@ class TestFindExecutable:
             ),
             mock.patch("shutil.which", return_value=None),
             mock.patch("pathlib.Path.home", return_value=tmp_path),
-            mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
+            mock.patch("sysconfig.get_path", side_effect=KeyError("mocked error")),
         ):
             _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
@@ -479,7 +479,7 @@ class TestFindExecutable:
             ),
             mock.patch("shutil.which", return_value=None),
             mock.patch("pathlib.Path.home", return_value=tmp_path),
-            mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
+            mock.patch("sysconfig.get_path", side_effect=KeyError("mocked error")),
         ):
             _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
@@ -506,7 +506,7 @@ class TestFindExecutable:
             mock.patch("shutil.which", return_value=None),
             mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}, clear=False),
             mock.patch.dict(os.environ, {"APPDATA": str(tmp_path)}, clear=False),
-            mock.patch("sysconfig.get_path", side_effect=Exception("mocked error")),
+            mock.patch("sysconfig.get_path", side_effect=KeyError("mocked error")),
         ):
             _make_fake_exe(scripts_dir, "moleditpy")
             result = installer_main.find_executable("moleditpy")
@@ -625,20 +625,16 @@ class TestGetIconPath:
             path = installer_main.get_icon_path()
         assert path is None
 
-    def test_returns_none_when_file_missing_in_package(self, tmp_path):
-        """as_file context resolves to a path that doesn't exist."""
-        missing = tmp_path / "icon.ico"
-
+    def test_returns_none_when_file_missing_in_package(self):
+        """A data file missing from the package must return None."""
         fake_ref = mock.MagicMock()
         fake_ref.__truediv__ = mock.Mock(return_value=fake_ref)
+        fake_ref.read_bytes = mock.Mock(side_effect=FileNotFoundError("icon.ico"))
 
         with (
             mock.patch("platform.system", return_value="Windows"),
             mock.patch("importlib.resources.files", return_value=fake_ref),
-            mock.patch("importlib.resources.as_file") as mock_as_file,
         ):
-            mock_as_file.return_value.__enter__ = mock.Mock(return_value=missing)
-            mock_as_file.return_value.__exit__ = mock.Mock(return_value=False)
             path = installer_main.get_icon_path()
 
         assert path is None
@@ -1147,7 +1143,9 @@ class TestInstall:
             mock.patch.object(installer_main, "refresh_launch_services"),
             mock.patch.object(installer_main, "codesign_app"),
             mock.patch("platform.system", return_value="Darwin"),
-            mock.patch("subprocess.run") as mock_run,
+            mock.patch(
+                "subprocess.run", return_value=mock.Mock(returncode=0, stderr=b"")
+            ) as mock_run,
             mock.patch("shutil.copytree"),
             mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
             mock.patch("pathlib.Path.home", return_value=tmp_path),
@@ -1185,7 +1183,9 @@ class TestInstall:
             mock.patch.object(installer_main, "refresh_launch_services"),
             mock.patch.object(installer_main, "codesign_app"),
             mock.patch("platform.system", return_value="Darwin"),
-            mock.patch("subprocess.run") as mock_run,
+            mock.patch(
+                "subprocess.run", return_value=mock.Mock(returncode=0, stderr=b"")
+            ) as mock_run,
             mock.patch("shutil.copytree"),
             mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
             mock.patch("pathlib.Path.home", return_value=tmp_path),
@@ -1219,7 +1219,9 @@ class TestInstall:
             mock.patch.object(installer_main, "refresh_launch_services"),
             mock.patch.object(installer_main, "codesign_app"),
             mock.patch("platform.system", return_value="Darwin"),
-            mock.patch("subprocess.run") as mock_run,
+            mock.patch(
+                "subprocess.run", return_value=mock.Mock(returncode=0, stderr=b"")
+            ) as mock_run,
             mock.patch("shutil.copytree"),
             mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
             mock.patch("pathlib.Path.home", return_value=tmp_path),
@@ -1239,6 +1241,7 @@ class TestInstall:
             # Simulate osacompile creating the target app directory
             app_path = args[0][2]
             os.makedirs(app_path, exist_ok=True)
+            return mock.Mock(returncode=0, stderr=b"")
 
         with (
             mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
@@ -1442,16 +1445,20 @@ class TestMainCLI:
             assert installer_main.get_installer_version() == "2.0.0"
 
         # Last-resort fallback must not claim a concrete (stale) version
+        from importlib.metadata import PackageNotFoundError
+
         with (
-            mock.patch("importlib.metadata.version", side_effect=Exception),
+            mock.patch("importlib.metadata.version", side_effect=PackageNotFoundError),
             mock.patch("pathlib.Path.exists", return_value=False),
         ):
             assert installer_main.get_installer_version() == "unknown"
 
     def test_get_installer_version_from_pyproject(self):
         # Test reading from pyproject.toml when metadata fails
+        from importlib.metadata import PackageNotFoundError
+
         with (
-            mock.patch("importlib.metadata.version", side_effect=Exception),
+            mock.patch("importlib.metadata.version", side_effect=PackageNotFoundError),
             mock.patch("pathlib.Path.exists", return_value=True),
             mock.patch(
                 "builtins.open", mock.mock_open(read_data='version = "1.5.0"\n')
@@ -1750,6 +1757,7 @@ class TestCodesignApp:
 
         def mock_subprocess_run(*args, **kwargs):
             os.makedirs(args[0][2], exist_ok=True)
+            return mock.Mock(returncode=0, stderr=b"")
 
         with (
             mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
@@ -1893,6 +1901,7 @@ class TestDarwinAppIconOverride:
             (resources / "Assets.car").write_bytes(b"car")
             with open(app / "Contents" / "Info.plist", "wb") as fp:
                 plistlib.dump({"CFBundleIconName": "applet"}, fp)
+            return mock.Mock(returncode=0, stderr=b"")
 
         with (
             mock.patch.object(
@@ -2406,3 +2415,319 @@ class TestTui:
             assert mock_install.call_args.args[0] == installer_main.InstallOptions()
 
         asyncio.run(check())
+
+
+# ---------------------------------------------------------------------------
+# v3.0.1 bug-fix and coverage tests
+# ---------------------------------------------------------------------------
+
+
+class TestV301Fixes:
+    def test_system_desktop_entry_quotes_spaces(self, tmp_path):
+        """An Exec path with spaces must be quoted or the desktop-entry
+        spec splits the command at the space."""
+        with (
+            mock.patch.object(installer_main, "linux_data_home", return_value=tmp_path),
+            mock.patch.object(installer_main, "_run_quiet", return_value=True),
+        ):
+            assert (
+                installer_main.write_linux_system_desktop_entry(
+                    "/opt/my conda/bin/moleditpy", None
+                )
+                is True
+            )
+
+        content = (tmp_path / "applications" / "MoleditPy.desktop").read_text(
+            encoding="utf-8"
+        )
+        assert 'Exec="/opt/my conda/bin/moleditpy" %f' in content
+
+    def test_system_desktop_entry_write_failure(self, tmp_path, capsys):
+        with (
+            mock.patch.object(installer_main, "linux_data_home", return_value=tmp_path),
+            mock.patch.object(Path, "write_text", side_effect=OSError("denied")),
+        ):
+            assert (
+                installer_main.write_linux_system_desktop_entry("/bin/m", None) is False
+            )
+        assert "Failed to write system desktop entry" in capsys.readouterr().out
+
+    def test_remove_system_scope_warns_without_root(self, tmp_path, capsys):
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.object(installer_main, "is_root", return_value=False),
+            mock.patch.object(installer_main, "unregister_file_associations_linux"),
+            mock.patch.object(
+                installer_main,
+                "get_persistent_data_dir",
+                return_value=tmp_path / "persistent",
+            ),
+        ):
+            installer_main.remove_shortcut(system_scope=True)
+
+        out = capsys.readouterr().out
+        assert "requires root" in out
+
+    def test_run_quiet_missing_tool_returns_false(self):
+        assert installer_main._run_quiet(["definitely-not-a-real-tool-xyz"]) is False
+
+    def test_patch_desktop_entry_write_failure(self, tmp_path, capsys):
+        desktop = tmp_path / "MoleditPy.desktop"
+        desktop.write_text("[Desktop Entry]\nExec=/bin/m\n", encoding="utf-8")
+
+        with mock.patch.object(Path, "write_text", side_effect=OSError("denied")):
+            assert installer_main._patch_linux_desktop_entry(desktop) is False
+        assert "could not update" in capsys.readouterr().out
+
+    def test_refresh_launch_services_warns_on_subprocess_error(self, tmp_path, capsys):
+        app = tmp_path / "MoleditPy.app"
+        app.mkdir()
+
+        with (
+            mock.patch("pathlib.Path.exists", return_value=True),
+            mock.patch("subprocess.run", side_effect=OSError("boom")),
+        ):
+            installer_main.refresh_launch_services(app)
+
+        assert "Launch Services refresh failed" in capsys.readouterr().out
+
+    def test_darwin_osacompile_failure_returns_1(self, tmp_path, capsys):
+        fake_exe = str(tmp_path / "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=sys.executable
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=True
+            ),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch(
+                "subprocess.run",
+                return_value=mock.Mock(returncode=1, stderr=b"syntax error"),
+            ),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            result = installer_main.install()
+
+        assert result == 1
+        out = capsys.readouterr().out
+        assert "osacompile failed" in out
+        assert "syntax error" in out
+
+    def test_darwin_unverifiable_pairing_warns_but_proceeds(self, tmp_path, capsys):
+        fake_exe = str(tmp_path / "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "python_for_executable", return_value=sys.executable
+            ),
+            mock.patch.object(
+                installer_main, "verify_launch_command", return_value=False
+            ),
+            mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(installer_main, "codesign_app"),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch(
+                "subprocess.run", return_value=mock.Mock(returncode=0, stderr=b"")
+            ),
+            mock.patch("shutil.copytree"),
+            mock.patch("moleditpy_installer.main.register_file_associations_darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install()
+
+        assert "could not verify" in capsys.readouterr().out
+
+    def test_linux_system_note_when_desktop_requested(self, tmp_path, capsys):
+        fake_exe = str(tmp_path / "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "is_root", return_value=True),
+            mock.patch.object(
+                installer_main, "write_linux_system_desktop_entry", return_value=True
+            ),
+            mock.patch.object(
+                installer_main, "register_file_associations_linux", return_value=True
+            ),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            result = installer_main.install(
+                installer_main.InstallOptions(system=True, desktop=True)
+            )
+
+        assert result == 0
+        assert "per-user" in capsys.readouterr().out
+
+
+class TestMainDispatch:
+    def test_main_dispatches_to_tui(self):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer"]),
+            mock.patch.object(installer_main, "_tui_available", return_value=True),
+            mock.patch("moleditpy_installer.tui.run_tui", return_value=0) as mock_tui,
+        ):
+            assert installer_main.main() == 0
+        mock_tui.assert_called_once()
+
+    def test_main_no_tui_flag_installs_directly(self):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--no-tui"]),
+            mock.patch.object(installer_main, "_tui_available", return_value=True),
+            mock.patch.object(installer_main, "install", return_value=0) as mock_i,
+        ):
+            assert installer_main.main() == 0
+        mock_i.assert_called_once_with(installer_main.InstallOptions())
+
+    def test_main_explicit_flags_skip_tui_and_build_options(self):
+        with (
+            mock.patch(
+                "sys.argv",
+                ["moleditpy-installer", "--desktop", "--no-file-assoc"],
+            ),
+            mock.patch.object(installer_main, "_tui_available", return_value=True),
+            mock.patch.object(installer_main, "install", return_value=0) as mock_i,
+        ):
+            assert installer_main.main() == 0
+        mock_i.assert_called_once_with(
+            installer_main.InstallOptions(
+                desktop=True, app_menu=True, file_assoc=False, system=False
+            )
+        )
+
+    def test_main_remove_passes_system_scope(self):
+        with (
+            mock.patch("sys.argv", ["moleditpy-installer", "--remove", "--system"]),
+            mock.patch.object(installer_main, "remove_shortcut") as mock_remove,
+        ):
+            assert installer_main.main() == 0
+        mock_remove.assert_called_once_with(system_scope=True)
+
+    def test_tui_available_false_without_tty(self):
+        with mock.patch.object(sys.stdin, "isatty", return_value=False):
+            assert installer_main._tui_available() is False
+
+
+@pytest.mark.skipif(not HAS_TEXTUAL, reason="textual is not installed")
+class TestTuiActions:
+    def _run(self, coro):
+        import asyncio
+
+        asyncio.run(coro)
+
+    def test_remove_button_runs_remove(self):
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            with mock.patch.object(
+                installer_main, "remove_shortcut", return_value=None
+            ) as mock_remove:
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from textual.widgets import Button
+
+                    app.query_one("#remove", Button).press()
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if mock_remove.called:
+                            break
+            assert mock_remove.called
+            assert mock_remove.call_args.kwargs == {"system_scope": False}
+            assert app.exit_code == 0
+
+        self._run(check())
+
+    def test_failed_install_sets_exit_code(self):
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            with mock.patch.object(installer_main, "install", return_value=1):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from textual.widgets import Button
+
+                    app.query_one("#install", Button).press()
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if app.exit_code == 1:
+                            break
+            assert app.exit_code == 1
+
+        self._run(check())
+
+    def test_exception_in_action_is_logged_not_raised(self):
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            with mock.patch.object(
+                installer_main, "install", side_effect=RuntimeError("kaboom")
+            ):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from textual.widgets import Button
+
+                    app.query_one("#install", Button).press()
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if app.exit_code == 1:
+                            break
+            assert app.exit_code == 1
+
+        self._run(check())
+
+    def test_quit_button_exits_with_code(self):
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                from textual.widgets import Button
+
+                app.query_one("#quit", Button).press()
+                await pilot.pause()
+            assert app.return_value == 0
+
+        self._run(check())
+
+    def test_log_writer_forwards_lines(self):
+        from moleditpy_installer.tui import _LogWriter
+
+        class FakeApp:
+            def __init__(self):
+                self.lines = []
+
+            def call_from_thread(self, fn, *args):
+                fn(*args)
+
+            def log_line(self, line):
+                self.lines.append(line)
+
+        app = FakeApp()
+        writer = _LogWriter(app)
+        writer.write("hello\nwor")
+        writer.write("ld\n")
+        writer.write("tail")
+        writer.flush()
+        assert app.lines == ["hello", "world", "tail"]
+
+    def test_run_tui_returns_int(self):
+        from moleditpy_installer import tui
+
+        with mock.patch.object(tui.InstallerApp, "run", return_value=None):
+            assert tui.run_tui() == 0
+        with mock.patch.object(tui.InstallerApp, "run", return_value=3):
+            assert tui.run_tui() == 3

@@ -100,7 +100,7 @@ def _extract_data_file(file_name: str) -> Optional[str]:
         out_path = get_persistent_data_dir() / file_name
         out_path.write_bytes(content)
         return str(out_path)
-    except Exception as e:
+    except (OSError, ModuleNotFoundError, ValueError) as e:
         print(f"Error extracting data file {file_name}: {e}")
         return None
 
@@ -180,7 +180,7 @@ def find_executable(name: str) -> Optional[str]:
             found = _check(nt_user_scripts)
             if found:
                 return found
-        except Exception:
+        except (KeyError, ValueError, OSError):
             pass
 
         # Check standard user Python installer paths
@@ -258,7 +258,7 @@ def find_executable(name: str) -> Optional[str]:
                     found = _check(Path(sysconfig.get_path("scripts", scheme)))
                     if found:
                         return found
-                except Exception:
+                except (KeyError, ValueError, OSError):
                     pass
 
         # ~/.local/bin is the standard target for `pip install --user` on Linux/macOS
@@ -504,7 +504,7 @@ def register_file_associations_darwin(app_path: Path) -> bool:
             # Touch the app bundle to notify Launch Services of changes
             try:
                 os.utime(str(app_path), None)
-            except Exception:
+            except OSError:
                 pass
 
             print("Successfully registered file associations in Info.plist.")
@@ -512,7 +512,8 @@ def register_file_associations_darwin(app_path: Path) -> bool:
 
         return True
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
+        # plistlib.InvalidFileException is a ValueError subclass
         print(f"Warning: Failed to update Info.plist: {e}")
         return False
 
@@ -520,7 +521,10 @@ def register_file_associations_darwin(app_path: Path) -> bool:
 def _run_quiet(cmd: list) -> bool:
     """Run a helper command best-effort: missing tools are not an error."""
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=60)
+        # Generous timeout: rebuilding the system MIME database
+        # (update-mime-database /usr/share/mime) processes every installed
+        # type and can exceed a minute on slow machines.
+        result = subprocess.run(cmd, capture_output=True, timeout=300)
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
@@ -655,6 +659,10 @@ def write_linux_system_desktop_entry(
     try:
         apps_dir.mkdir(parents=True, exist_ok=True)
         icon_line = f"Icon={icon_path}\n" if icon_path else ""
+        # Quote a bare executable path containing spaces, or the Exec line
+        # is split at the space by the desktop-entry spec.
+        if " " in exe_command and not exe_command.startswith('"'):
+            exe_command = f'"{exe_command}"'
         (apps_dir / "MoleditPy.desktop").write_text(
             "[Desktop Entry]\n"
             "Type=Application\n"
@@ -743,6 +751,12 @@ def remove_shortcut(system_scope: bool = False) -> None:
     system = platform.system()
     shortcut_paths = []
     shortcut_name = "MoleditPy"
+
+    if system_scope and system != "Windows" and not is_root():
+        print(
+            "Warning: removing a system-wide install requires root; "
+            "system files will likely remain. Re-run with sudo."
+        )
 
     if system == "Windows":
         # Usually in APPDATA/Microsoft/Windows/Start Menu/Programs
@@ -884,7 +898,7 @@ def verify_launch_command(python_path: str, exe_path: str) -> bool:
             timeout=60,
         )
         return result.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
@@ -906,7 +920,7 @@ def codesign_app(app_path: Path) -> None:
         if result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
             print(f"Warning: codesign failed: {stderr}")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         print(f"Warning: could not re-sign app bundle: {e}")
 
 
@@ -945,7 +959,7 @@ def refresh_launch_services(app_path: Path, unregister: bool = False) -> None:
                     capture_output=True,
                     timeout=60,
                 )
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 print(f"Warning: Launch Services refresh failed: {e}")
             return
 
@@ -1155,10 +1169,16 @@ end open
             target_app_path = build_root / target_app_name
 
             try:
-                subprocess.run(
+                # capture_output: osacompile chatter must not scribble over
+                # the TUI, and its stderr belongs in the error message.
+                compile_result = subprocess.run(
                     ["osacompile", "-o", str(target_app_path), "-e", applescript_code],
-                    check=True,
+                    capture_output=True,
+                    timeout=300,
                 )
+                if compile_result.returncode != 0:
+                    stderr = compile_result.stderr.decode(errors="replace").strip()
+                    raise RuntimeError(f"osacompile failed: {stderr}")
 
                 # Modern osacompile applets ship a compiled asset catalog
                 # (Assets.car) + CFBundleIconName; macOS prefers that over
@@ -1236,7 +1256,12 @@ end open
 
                 if options.file_assoc:
                     print("Double-clicking .pmeprj files will now open MoleditPy.")
-            except Exception as e:
+            except (
+                OSError,
+                subprocess.SubprocessError,
+                RuntimeError,
+                ValueError,
+            ) as e:
                 print(f"Failed to create macOS app bundle natively: {e}")
                 return 1
             finally:
@@ -1267,10 +1292,10 @@ end open
 def get_installer_version() -> str:
     """Gets the version of the installer package."""
     try:
-        from importlib.metadata import version
+        from importlib.metadata import PackageNotFoundError, version
 
         return version("moleditpy-installer")
-    except Exception:
+    except (ImportError, PackageNotFoundError):
         pass
 
     try:
@@ -1282,7 +1307,7 @@ def get_installer_version() -> str:
                         parts = line.split("=", 1)
                         if len(parts) == 2:
                             return parts[1].strip().strip('"').strip("'")
-    except Exception:
+    except OSError:
         pass
 
     return "unknown"
