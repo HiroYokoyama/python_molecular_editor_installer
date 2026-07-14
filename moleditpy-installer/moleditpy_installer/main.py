@@ -376,6 +376,7 @@ def register_file_associations_darwin(app_path: Path) -> bool:
                 "CFBundleTypeName": "MoleditPy Project File",
                 "CFBundleTypeRole": "Editor",
                 "LSHandlerRank": "Owner",
+                "CFBundleTypeIconFile": "applet.icns",
             }
             doc_types.append(new_doc_type)
             pl["CFBundleDocumentTypes"] = doc_types
@@ -638,11 +639,12 @@ def install() -> None:
             target_app_path = desktop_dir / target_app_name
 
             # Ensure proper execution path
-            mac_target_script = target_script
-            mac_target_args = target_args
-            if target_script == original_exe_path:
-                mac_target_script = sys.executable
-                mac_target_args = f'"{original_exe_path}"'
+            # On macOS, `conda run` inside AppleScript's `do shell script` often strips
+            # sys.path or fails to resolve editable pip installs.
+            # Bypassing it and explicitly using `sys.executable` guarantees that the exact
+            # Python interpreter which successfully ran the installer is used.
+            mac_target_script = sys.executable
+            mac_target_args = f'"{original_exe_path}"'
 
             applescript_escaped_args = mac_target_args.replace('"', '\\"')
 
