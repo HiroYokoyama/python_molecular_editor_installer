@@ -933,7 +933,9 @@ class TestInstall:
             installer_main.install()
 
         mock_shortcut.assert_called_once()
-
+        _, kwargs = mock_shortcut.call_args
+        assert kwargs.get("startmenu") is True
+        assert kwargs.get("desktop") is True
     def test_install_calls_make_shortcut_on_linux(self, tmp_path):
         fake_exe = str(tmp_path / "moleditpy")
 
@@ -949,7 +951,7 @@ class TestInstall:
         mock_shortcut.assert_called_once()
         _, kwargs = mock_shortcut.call_args
         assert kwargs.get("startmenu") is True
-        assert kwargs.get("desktop") is False
+        assert kwargs.get("desktop") is True
 
     def test_install_calls_make_shortcut_on_darwin(self, tmp_path):
         fake_exe = str(tmp_path / "moleditpy")

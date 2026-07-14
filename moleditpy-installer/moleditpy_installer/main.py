@@ -561,11 +561,11 @@ def install() -> None:
                 script=full_command,
                 name=shortcut_name,
                 icon=icon_path,
-                desktop=False,
+                desktop=True,
                 startmenu=True,
                 noexe=True,
             )
-            print(f"Successfully created '{shortcut_name}' in the application menu.")
+            print(f"Successfully created '{shortcut_name}' in the application menu and on the Desktop.")
 
         elif system == "Darwin":
             print("macOS detected. Creating application shortcut...")
