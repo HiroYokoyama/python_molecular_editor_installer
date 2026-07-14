@@ -14,8 +14,25 @@ This package is a helper utility that automatically installs the correct version
     ```
     This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
 
-2.  **Create Shortcut**
-    After installation, run the following command in your terminal to create the shortcut in your application menu (e.g., Start Menu on Windows, Applications on macOS) and register file associations for `.pmeprj` files (Windows and macOS).
+2.  **Run the interactive installer (TUI)**
+    Run the following command in your terminal. In an interactive terminal this opens a TUI (like `nmtui`) where you pick the components — Desktop shortcut, application-menu entry, `.pmeprj` file association — and the scope (per-user or system-wide), then press **Install**:
+
+    ```bash
+    moleditpy-installer
+    ```
+
+    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope.
+
+    **Non-interactive / scripted use** (also what runs automatically when there is no terminal):
+
+    ```bash
+    moleditpy-installer --no-tui                 # install with the defaults
+    moleditpy-installer --desktop                # also create a Desktop shortcut
+    moleditpy-installer --no-file-assoc          # skip the .pmeprj association
+    sudo moleditpy-installer --system            # system-wide (Linux/macOS)
+    ```
+
+    Any explicit option skips the TUI.
 
     > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
 
@@ -34,7 +51,7 @@ This package is a helper utility that automatically installs the correct version
     > **Tip:** Run the installer from the Python environment where `moleditpy` is installed (e.g. after `conda activate <env>`). The installer verifies the launch command and warns you if the pairing cannot start MoleditPy.
 
 3.  **Remove Shortcut**
-    To remove the shortcut, unregister file associations, and clean up extracted icon files, run:
+    To remove the shortcuts, unregister file associations, and clean up extracted icon files, run (add `--system` for a system-wide install):
 
     ```bash
     moleditpy-installer --remove
@@ -86,6 +103,14 @@ This package is a helper utility that automatically installs the correct version
 - `.pmeprj` documents get their own file icon in file managers, matching Windows and macOS.
 
 `moleditpy-installer --remove` undoes all of the above for the current user.
+
+## Version 3.0 highlights
+
+- **New:** interactive Textual TUI — pick components and scope, watch the log, press Install/Remove.
+- **New:** component selection (`--desktop`, `--app-menu`, `--file-assoc`) with safer defaults (no Desktop shortcut unless requested).
+- **New:** system-wide scope on Linux (`/usr/share`, requires sudo) and macOS (`/Applications`); Windows stays per-user.
+- Per-user Linux paths now honor `XDG_DATA_HOME`.
+- End-to-end smoke tests on all three OSes in CI, including the sudo/system path.
 
 ## Version 2.0 highlights
 

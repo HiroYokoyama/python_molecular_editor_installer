@@ -1085,12 +1085,34 @@ class TestInstall:
             mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
             mock.patch.dict(os.environ, {}, clear=True),
         ):
-            installer_main.install()
+            installer_main.install(installer_main.InstallOptions(desktop=True))
 
         mock_shortcut.assert_called_once()
         _, kwargs = mock_shortcut.call_args
         assert kwargs.get("startmenu") is True
         assert kwargs.get("desktop") is True
+
+    def test_install_defaults_skip_desktop(self, tmp_path):
+        """v3 defaults: app menu on, Desktop shortcut off."""
+        fake_exe = str(tmp_path / "moleditpy.exe")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "get_file_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "register_file_associations_windows", return_value=True
+            ) as mock_assoc,
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            assert installer_main.install() == 0
+
+        _, kwargs = mock_shortcut.call_args
+        assert kwargs.get("startmenu") is True
+        assert kwargs.get("desktop") is False
+        mock_assoc.assert_called_once()
 
     def test_install_calls_make_shortcut_on_linux(self, tmp_path):
         fake_exe = str(tmp_path / "moleditpy")
@@ -1103,7 +1125,7 @@ class TestInstall:
             mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
             mock.patch.dict(os.environ, {}, clear=True),
         ):
-            installer_main.install()
+            installer_main.install(installer_main.InstallOptions(desktop=True))
 
         mock_shortcut.assert_called_once()
         _, kwargs = mock_shortcut.call_args
@@ -1746,10 +1768,11 @@ class TestCodesignApp:
             mock.patch("pathlib.Path.home", return_value=tmp_path),
             mock.patch.dict(os.environ, {}, clear=True),
         ):
-            installer_main.install()
+            installer_main.install(installer_main.InstallOptions(desktop=True))
 
         signed = [str(c.args[0]) for c in mock_sign.call_args_list]
-        assert len(signed) == 2
+        # build bundle + each destination copy
+        assert len(signed) == 3
         assert str(tmp_path / "Desktop" / "MoleditPy.app") in signed
         assert str(tmp_path / "Applications" / "MoleditPy.app") in signed
 
@@ -1862,6 +1885,7 @@ class TestDarwinAppIconOverride:
         import plistlib
 
         def fake_osacompile(cmd, **kwargs):
+            # exist_ok=False: the scratch build dir must always be fresh
             app = Path(cmd[2])
             resources = app / "Contents" / "Resources"
             resources.mkdir(parents=True, exist_ok=False)
@@ -1889,7 +1913,9 @@ class TestDarwinAppIconOverride:
             mock.patch("pathlib.Path.home", return_value=tmp_path),
             mock.patch.dict(os.environ, {}, clear=True),
         ):
-            assert installer_main.install() == 0
+            assert (
+                installer_main.install(installer_main.InstallOptions(desktop=True)) == 0
+            )
 
         return tmp_path / "Desktop" / "MoleditPy.app"
 
@@ -1909,15 +1935,15 @@ class TestDarwinAppIconOverride:
         assert pl["CFBundleVersion"] == installer_main.get_installer_version()
 
     def test_stale_desktop_bundle_replaced(self, tmp_path):
-        """osacompile -o into an existing .app keeps leftovers — the old
-        bundle must be removed first (fake osacompile uses exist_ok=False,
-        so this would raise if it were not)."""
+        """An existing destination bundle must be fully replaced, not
+        merged into (leftover files would keep stale icons/doc types)."""
         stale = tmp_path / "Desktop" / "MoleditPy.app" / "Contents"
         stale.mkdir(parents=True)
         (stale / "stale-marker").write_bytes(b"old")
 
         app = self._install_with_fake_osacompile(tmp_path)
 
+        assert app.exists()
         assert not (app / "Contents" / "stale-marker").exists()
 
 
@@ -2150,3 +2176,227 @@ class TestDarwinDocTypeReplacement:
         doc_types = pl["CFBundleDocumentTypes"]
         assert len(doc_types) == 1
         assert doc_types[0]["CFBundleTypeExtensions"] == ["pmeprj"]
+
+
+# ---------------------------------------------------------------------------
+# InstallOptions / scope handling (v3)
+# ---------------------------------------------------------------------------
+
+
+class TestInstallOptions:
+    def test_all_disabled_is_an_error(self, capsys):
+        result = installer_main.install(
+            installer_main.InstallOptions(
+                desktop=False, app_menu=False, file_assoc=False
+            )
+        )
+        assert result == 1
+        assert "Nothing to install" in capsys.readouterr().out
+
+    def test_system_scope_rejected_on_windows(self, capsys):
+        with mock.patch("platform.system", return_value="Windows"):
+            result = installer_main.install(installer_main.InstallOptions(system=True))
+        assert result == 1
+        assert "not supported on Windows" in capsys.readouterr().out
+
+    def test_system_scope_requires_root(self, capsys):
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(installer_main, "is_root", return_value=False),
+        ):
+            result = installer_main.install(installer_main.InstallOptions(system=True))
+        assert result == 1
+        assert "root" in capsys.readouterr().out
+
+    def test_file_assoc_only_on_windows(self, tmp_path):
+        """file association without any shortcut is valid on Windows."""
+        fake_exe = str(tmp_path / "moleditpy.exe")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "get_file_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "register_file_associations_windows", return_value=True
+            ) as mock_assoc,
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            result = installer_main.install(
+                installer_main.InstallOptions(desktop=False, app_menu=False)
+            )
+
+        assert result == 0
+        mock_shortcut.assert_not_called()
+        mock_assoc.assert_called_once()
+
+    def test_no_file_assoc_skips_registration_on_windows(self, tmp_path):
+        fake_exe = str(tmp_path / "moleditpy.exe")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(
+                installer_main, "register_file_associations_windows"
+            ) as mock_assoc,
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch("moleditpy_installer.main.make_shortcut"),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            result = installer_main.install(
+                installer_main.InstallOptions(file_assoc=False)
+            )
+
+        assert result == 0
+        mock_assoc.assert_not_called()
+
+    def test_darwin_requires_a_bundle_destination(self, tmp_path, capsys):
+        fake_exe = str(tmp_path / "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            result = installer_main.install(
+                installer_main.InstallOptions(desktop=False, app_menu=False)
+            )
+
+        assert result == 1
+        assert "bundle" in capsys.readouterr().out
+
+    def test_linux_system_scope_writes_system_desktop_entry(self, tmp_path):
+        fake_exe = str(tmp_path / "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=fake_exe),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch.object(installer_main, "is_root", return_value=True),
+            mock.patch.object(
+                installer_main, "write_linux_system_desktop_entry", return_value=True
+            ) as mock_entry,
+            mock.patch.object(
+                installer_main, "register_file_associations_linux", return_value=True
+            ) as mock_assoc,
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            result = installer_main.install(installer_main.InstallOptions(system=True))
+
+        assert result == 0
+        mock_entry.assert_called_once()
+        mock_shortcut.assert_not_called()
+        mock_assoc.assert_called_once_with(system=True)
+
+
+class TestLinuxSystemDesktopEntry:
+    def test_writes_entry(self, tmp_path):
+        with (
+            mock.patch.object(
+                installer_main, "linux_data_home", return_value=tmp_path / "usr_share"
+            ),
+            mock.patch.object(installer_main, "_run_quiet", return_value=True),
+        ):
+            exe = "/opt/conda/bin/moleditpy"
+            assert (
+                installer_main.write_linux_system_desktop_entry(
+                    exe, "/usr/share/icons/moleditpy.png"
+                )
+                is True
+            )
+
+        entry = tmp_path / "usr_share" / "applications" / "MoleditPy.desktop"
+        content = entry.read_text(encoding="utf-8")
+        assert "Exec=/opt/conda/bin/moleditpy %f" in content
+        assert "Terminal=true" in content
+        assert "MimeType=application/x-moleditpy-project;" in content
+        assert "Icon=/usr/share/icons/moleditpy.png" in content
+
+
+class TestLinuxDataHome:
+    def test_honors_xdg_data_home(self, tmp_path):
+        with mock.patch.dict(
+            os.environ, {"XDG_DATA_HOME": str(tmp_path / "xdg")}, clear=False
+        ):
+            assert installer_main.linux_data_home() == tmp_path / "xdg"
+
+    def test_system_scope_is_usr_share(self):
+        assert installer_main.linux_data_home(system=True) == Path("/usr/share")
+
+
+class TestRemoveSystemScope:
+    def test_darwin_system_scope_targets_applications(self, tmp_path):
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+            mock.patch.object(installer_main, "refresh_launch_services"),
+            mock.patch.object(
+                installer_main,
+                "get_persistent_data_dir",
+                return_value=tmp_path / "persistent",
+            ),
+            mock.patch("shutil.rmtree") as mock_rmtree,
+            mock.patch("pathlib.Path.exists", return_value=True),
+            mock.patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            installer_main.remove_shortcut(system_scope=True)
+
+        removed = {str(c.args[0]) for c in mock_rmtree.call_args_list}
+        assert str(Path("/Applications") / "MoleditPy.app") in removed
+
+
+# ---------------------------------------------------------------------------
+# TUI (textual)
+# ---------------------------------------------------------------------------
+
+textual = pytest.importorskip("textual")
+
+
+class TestTui:
+    def test_defaults_match_spec(self):
+        """TUI defaults: desktop off, app menu on, file assoc on, user scope."""
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test() as pilot:
+                from textual.widgets import Checkbox, RadioButton
+
+                assert app.query_one("#desktop", Checkbox).value is False
+                assert app.query_one("#app_menu", Checkbox).value is True
+                assert app.query_one("#file_assoc", Checkbox).value is True
+                assert app.query_one("#scope_user", RadioButton).value is True
+                assert app.query_one("#scope_system", RadioButton).value is False
+                assert app._selected_options() == installer_main.InstallOptions()
+                await pilot.pause()
+
+        asyncio.run(check())
+
+    def test_install_button_runs_install(self):
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            with mock.patch.object(
+                installer_main, "install", return_value=0
+            ) as mock_install:
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from textual.widgets import Button
+
+                    app.query_one("#install", Button).press()
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if mock_install.called:
+                            break
+            assert mock_install.called
+            assert mock_install.call_args.args[0] == installer_main.InstallOptions()
+
+        asyncio.run(check())

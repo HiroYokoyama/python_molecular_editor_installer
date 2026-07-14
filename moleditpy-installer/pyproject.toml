@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-installer"
-version = "2.0.1"
+version = "3.0.0"
 authors = [
   { name="HiroYokoyama", email="titech.yoko.hiro@gmail.com" },
 ]
@@ -26,6 +26,7 @@ classifiers = [
 
 dependencies = [
     "pyshortcuts >= 1.0.0",
+    "textual >= 0.86",
     "moleditpy-linux; sys_platform == 'linux'",
     "moleditpy; sys_platform == 'win32'",
     "moleditpy; sys_platform == 'darwin'",

@@ -16,6 +16,8 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -42,6 +44,35 @@ _SYSTEM_CONDA_ROOTS = [
 # it per the freedesktop spec ('/' -> '-').
 LINUX_MIME_TYPE = "application/x-moleditpy-project"
 _LINUX_MIME_ICON_NAME = "application-x-moleditpy-project"
+
+
+@dataclass
+class InstallOptions:
+    """
+    What to install and at which level.
+
+    Defaults: no Desktop shortcut, application-menu entry on, .pmeprj
+    file association on, per-user scope.
+    """
+
+    desktop: bool = False
+    app_menu: bool = True
+    file_assoc: bool = True
+    system: bool = False  # system-wide (sudo/admin) instead of per-user
+
+
+def is_root() -> bool:
+    """True when running with root privileges (POSIX only)."""
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
+
+
+def linux_data_home(system: bool = False) -> Path:
+    """freedesktop data dir: per-user ~/.local/share or system /usr/share."""
+    if system:
+        return Path("/usr/share")
+    xdg = os.environ.get("XDG_DATA_HOME")
+    return Path(xdg) if xdg else Path.home() / ".local" / "share"
 
 
 def get_persistent_data_dir() -> Path:
@@ -526,17 +557,18 @@ def _patch_linux_desktop_entry(desktop_path: Path) -> bool:
         return False
 
 
-def register_file_associations_linux() -> bool:
+def register_file_associations_linux(system: bool = False) -> bool:
     """
     Register the .pmeprj MIME type, its file icon, and the default handler
-    on Linux (freedesktop shared-mime-info; per-user, no root needed).
+    on Linux (freedesktop shared-mime-info). Per-user by default; with
+    ``system=True`` writes under /usr/share (requires root).
     """
     if platform.system() != "Linux":
         return False
 
     try:
         print("Registering file associations...")
-        data_home = Path.home() / ".local" / "share"
+        data_home = linux_data_home(system)
 
         # 1. MIME type definition
         mime_dir = data_home / "mime"
@@ -569,7 +601,9 @@ def register_file_associations_linux() -> bool:
         _patch_linux_desktop_entry(apps_dir / "MoleditPy.desktop")
         _patch_linux_desktop_entry(Path.home() / "Desktop" / "MoleditPy.desktop")
         _run_quiet(["update-desktop-database", str(apps_dir)])
-        _run_quiet(["xdg-mime", "default", "MoleditPy.desktop", LINUX_MIME_TYPE])
+        if not system:
+            # per-user default handler; system scope has no mimeapps default
+            _run_quiet(["xdg-mime", "default", "MoleditPy.desktop", LINUX_MIME_TYPE])
 
         print(f"  Associated .pmeprj with MoleditPy ({LINUX_MIME_TYPE})")
         print("File associations registered successfully.")
@@ -580,13 +614,13 @@ def register_file_associations_linux() -> bool:
         return False
 
 
-def unregister_file_associations_linux() -> None:
+def unregister_file_associations_linux(system: bool = False) -> None:
     """Remove the .pmeprj MIME type, its icon, and refresh the databases."""
     if platform.system() != "Linux":
         return
 
     print("Unregistering file associations...")
-    data_home = Path.home() / ".local" / "share"
+    data_home = linux_data_home(system)
     mime_dir = data_home / "mime"
     for path in (
         mime_dir / "packages" / "moleditpy.xml",
@@ -608,6 +642,39 @@ def unregister_file_associations_linux() -> None:
     _run_quiet(["update-desktop-database", str(data_home / "applications")])
     _run_quiet(["gtk-update-icon-cache", str(data_home / "icons" / "hicolor")])
     print("File associations unregistered.")
+
+
+def write_linux_system_desktop_entry(
+    exe_command: str, icon_path: Optional[str]
+) -> bool:
+    """
+    Write /usr/share/applications/MoleditPy.desktop for a system-wide
+    install (pyshortcuts only supports per-user locations).
+    """
+    apps_dir = linux_data_home(system=True) / "applications"
+    try:
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        icon_line = f"Icon={icon_path}\n" if icon_path else ""
+        (apps_dir / "MoleditPy.desktop").write_text(
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=MoleditPy\n"
+            "Comment=Molecular editor for DFT preparation\n"
+            f"Exec={exe_command} %f\n"
+            f"{icon_line}"
+            "Terminal=true\n"
+            "Categories=Science;Chemistry;\n"
+            f"MimeType={LINUX_MIME_TYPE};\n",
+            encoding="utf-8",
+        )
+        _run_quiet(["update-desktop-database", str(apps_dir)])
+        print(
+            f"Created system application-menu entry: {apps_dir / 'MoleditPy.desktop'}"
+        )
+        return True
+    except OSError as e:
+        print(f"Failed to write system desktop entry: {e}")
+        return False
 
 
 def delete_registry_tree(key, sub_key):
@@ -666,9 +733,12 @@ def unregister_file_associations_windows() -> None:
         print(f"Error during file association removal: {e}")
 
 
-def remove_shortcut() -> None:
+def remove_shortcut(system_scope: bool = False) -> None:
     """
-    Removes the created shortcut and file associations (on Windows).
+    Removes the created shortcuts and file associations.
+
+    With ``system_scope=True`` also removes system-wide artifacts
+    (/usr/share on Linux, /Applications on macOS; requires root).
     """
     system = platform.system()
     shortcut_paths = []
@@ -695,16 +765,26 @@ def remove_shortcut() -> None:
         # Usually in ~/.local/share/applications/ plus a Desktop copy
         home = Path.home()
         shortcut_paths.append(
-            home / ".local" / "share" / "applications" / f"{shortcut_name}.desktop"
+            linux_data_home() / "applications" / f"{shortcut_name}.desktop"
         )
         shortcut_paths.append(home / "Desktop" / f"{shortcut_name}.desktop")
 
         unregister_file_associations_linux()
 
+        if system_scope:
+            shortcut_paths.append(
+                linux_data_home(system=True)
+                / "applications"
+                / f"{shortcut_name}.desktop"
+            )
+            unregister_file_associations_linux(system=True)
+
     elif system == "Darwin":
         home = Path.home()
         shortcut_paths.append(home / "Applications" / f"{shortcut_name}.app")
         shortcut_paths.append(home / "Desktop" / f"{shortcut_name}.app")
+        if system_scope:
+            shortcut_paths.append(Path("/Applications") / f"{shortcut_name}.app")
 
     else:
         print(f"Removal not fully supported/automated for OS: {system}")
@@ -870,9 +950,10 @@ def refresh_launch_services(app_path: Path, unregister: bool = False) -> None:
             return
 
 
-def install() -> int:
+def install(options: Optional[InstallOptions] = None) -> int:
     """
-    Creates a shortcut for the installed moleditpy executable.
+    Creates shortcuts and file associations for the installed moleditpy
+    executable according to *options* (see InstallOptions for defaults).
     Handles Conda environments by using 'conda run'.
 
     On macOS the launcher always opens MoleditPy inside a Terminal window,
@@ -881,6 +962,25 @@ def install() -> int:
     Returns:
         int: 0 on success, 1 on failure.
     """
+    if options is None:
+        options = InstallOptions()
+
+    system = platform.system()
+
+    if not (options.desktop or options.app_menu or options.file_assoc):
+        print("Nothing to install: all components are disabled.")
+        return 1
+
+    if options.system:
+        if system == "Windows":
+            print("Error: system-wide installation is not supported on Windows.")
+            print("Run without --system for a per-user install (no admin needed).")
+            return 1
+        if not is_root():
+            print("Error: system-wide installation requires root privileges.")
+            print("Re-run with sudo, or drop --system for a per-user install.")
+            return 1
+
     command_name = "moleditpy"
 
     # 1. Get Icon
@@ -937,8 +1037,6 @@ def install() -> int:
         target_script = original_exe_path
         target_args = ""  # No arguments
 
-    system = platform.system()
-
     try:
         shortcut_name = "MoleditPy"
 
@@ -954,26 +1052,50 @@ def install() -> int:
             full_command = target_script
 
         if system in ("Windows", "Linux"):
-            make_shortcut(
-                script=full_command,
-                name=shortcut_name,
-                icon=icon_path,
-                desktop=True,
-                startmenu=True,
-                noexe=True,
-            )
-            print(
-                f"Successfully created '{shortcut_name}' in the application menu and on the Desktop."
-            )
+            if options.desktop or options.app_menu:
+                if system == "Linux" and options.system:
+                    # pyshortcuts only writes per-user locations
+                    write_linux_system_desktop_entry(full_command, icon_path)
+                    if options.desktop:
+                        print(
+                            "Note: Desktop shortcuts are per-user; "
+                            "skipped for a system-wide install."
+                        )
+                else:
+                    make_shortcut(
+                        script=full_command,
+                        name=shortcut_name,
+                        icon=icon_path,
+                        desktop=options.desktop,
+                        startmenu=options.app_menu,
+                        noexe=True,
+                    )
+                    created_in = [
+                        loc
+                        for enabled, loc in (
+                            (options.app_menu, "the application menu"),
+                            (options.desktop, "the Desktop"),
+                        )
+                        if enabled
+                    ]
+                    print(
+                        f"Successfully created '{shortcut_name}' in "
+                        f"{' and '.join(created_in)}."
+                    )
 
-            if system == "Linux":
-                register_file_associations_linux()
+            if system == "Linux" and options.file_assoc:
+                register_file_associations_linux(system=options.system)
 
         elif system == "Darwin":
+            if not (options.desktop or options.app_menu):
+                print(
+                    "Error: on macOS the file association lives inside the app "
+                    "bundle — enable the application menu or the Desktop shortcut."
+                )
+                return 1
+
             print("macOS detected. Creating application shortcut natively...")
-            desktop_dir = Path.home() / "Desktop"
             target_app_name = f"{shortcut_name}.app"
-            target_app_path = desktop_dir / target_app_name
 
             # Pair the found console script with the interpreter of its OWN
             # environment. sys.executable (the installer's Python) may belong
@@ -1026,12 +1148,13 @@ on open dropped_items
     my launch_moleditpy(arg_string)
 end open
 """
-            try:
-                # Remove any stale bundle first: osacompile -o into an
-                # existing .app keeps leftover files (old icons, Assets.car).
-                if target_app_path.exists():
-                    shutil.rmtree(target_app_path)
+            # Build the bundle in a scratch dir (never into an existing .app:
+            # osacompile -o keeps leftover files), then copy to the selected
+            # destinations.
+            build_root = Path(tempfile.mkdtemp(prefix="moleditpy-installer-"))
+            target_app_path = build_root / target_app_name
 
+            try:
                 subprocess.run(
                     ["osacompile", "-o", str(target_app_path), "-e", applescript_code],
                     check=True,
@@ -1077,38 +1200,47 @@ end open
                     app_resources.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(icon_path, app_resources / "applet.icns")
 
-                register_file_associations_darwin(target_app_path)
+                if options.file_assoc:
+                    register_file_associations_darwin(target_app_path)
 
                 # Re-sign AFTER all bundle modifications, or Apple Silicon
                 # refuses to launch the app (silently from Finder).
                 codesign_app(target_app_path)
 
-                dest_dir = Path.home() / "Applications"
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_app = dest_dir / target_app_name
-                if dest_app.exists():
-                    if dest_app.is_dir():
-                        shutil.rmtree(dest_app)
-                    else:
-                        os.remove(dest_app)
+                destinations = []
+                if options.app_menu:
+                    apps_dir = (
+                        Path("/Applications")
+                        if options.system
+                        else Path.home() / "Applications"
+                    )
+                    destinations.append(apps_dir / target_app_name)
+                if options.desktop:
+                    destinations.append(Path.home() / "Desktop" / target_app_name)
 
-                shutil.copytree(str(target_app_path), str(dest_app), symlinks=True)
-                codesign_app(dest_app)
+                for dest_app in destinations:
+                    dest_app.parent.mkdir(parents=True, exist_ok=True)
+                    if dest_app.exists():
+                        if dest_app.is_dir():
+                            shutil.rmtree(dest_app)
+                        else:
+                            os.remove(dest_app)
 
-                # Refresh Launch Services so the custom icon and the .pmeprj
-                # association take effect immediately (no logout needed).
-                refresh_launch_services(dest_app)
-                refresh_launch_services(target_app_path)
+                    shutil.copytree(str(target_app_path), str(dest_app), symlinks=True)
+                    codesign_app(dest_app)
 
-                print("Created shortcut in ~/Applications and on the Desktop.")
-                print("Double-clicking .pmeprj files will now open MoleditPy.")
-                print(
-                    "If you want it in the system /Applications folder, "
-                    "move the Desktop copy there."
-                )
+                    # Refresh Launch Services so the custom icon and the
+                    # .pmeprj association take effect immediately.
+                    refresh_launch_services(dest_app)
+                    print(f"Created shortcut: {dest_app}")
+
+                if options.file_assoc:
+                    print("Double-clicking .pmeprj files will now open MoleditPy.")
             except Exception as e:
                 print(f"Failed to create macOS app bundle natively: {e}")
                 return 1
+            finally:
+                shutil.rmtree(build_root, ignore_errors=True)
         else:
             print(f"Shortcut creation is not supported on this OS: {system}")
             return 1
@@ -1120,7 +1252,7 @@ end open
     # Register file associations on Windows (.pmeprj only — .pmeraw is a
     # pickle-based format and is intentionally NOT associated with
     # double-click for safety).
-    if system == "Windows" and original_exe_path:
+    if system == "Windows" and original_exe_path and options.file_assoc:
         file_icon_path = get_file_icon_path()
         if not file_icon_path:
             file_icon_path = icon_path
@@ -1156,24 +1288,67 @@ def get_installer_version() -> str:
     return "unknown"
 
 
+def _tui_available() -> bool:
+    """True when an interactive Textual UI can run in this session."""
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return False
+    except (AttributeError, ValueError):
+        return False
+    try:
+        import textual  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def main() -> int:
-    """Parse CLI arguments and run install or remove."""
+    """Parse CLI arguments and run the TUI, install, or remove."""
     parser = argparse.ArgumentParser(
         prog="moleditpy-installer",
         description=(
-            "Installer for MoleditPy shortcut and file associations "
-            f"(v{get_installer_version()})."
+            "Installer for MoleditPy shortcuts and file associations "
+            f"(v{get_installer_version()}). Run without arguments in a "
+            "terminal for the interactive TUI."
         ),
     )
     parser.add_argument(
         "--remove",
         action="store_true",
-        help="Remove the shortcut and unregister file associations.",
+        help="Remove the shortcuts and unregister file associations.",
     )
     parser.add_argument(
         "--check",
         action="store_true",
         help="Search for the moleditpy executable in search paths, print the result, and exit.",
+    )
+    parser.add_argument(
+        "--desktop",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Create a Desktop shortcut (default: no).",
+    )
+    parser.add_argument(
+        "--app-menu",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Create an application-menu entry (default: yes).",
+    )
+    parser.add_argument(
+        "--file-assoc",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Associate .pmeprj files with MoleditPy (default: yes).",
+    )
+    parser.add_argument(
+        "--system",
+        action="store_true",
+        help="Install system-wide instead of per-user (Linux/macOS; requires sudo).",
+    )
+    parser.add_argument(
+        "--no-tui",
+        action="store_true",
+        help="Skip the interactive TUI and install directly with the given options.",
     )
     parser.add_argument(
         "--version",
@@ -1185,7 +1360,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.remove:
-        remove_shortcut()
+        remove_shortcut(system_scope=args.system)
         return 0
 
     if args.check:
@@ -1219,7 +1394,28 @@ def main() -> int:
         )
         return 1
 
-    return install()
+    explicit_flags = (
+        args.desktop is not None
+        or args.app_menu is not None
+        or args.file_assoc is not None
+        or args.system
+    )
+
+    options = InstallOptions(
+        desktop=bool(args.desktop) if args.desktop is not None else False,
+        app_menu=bool(args.app_menu) if args.app_menu is not None else True,
+        file_assoc=bool(args.file_assoc) if args.file_assoc is not None else True,
+        system=args.system,
+    )
+
+    # Interactive TUI when in a real terminal and nothing was decided on
+    # the command line; otherwise install directly with the options.
+    if not args.no_tui and not explicit_flags and _tui_available():
+        from .tui import run_tui
+
+        return run_tui()
+
+    return install(options)
 
 
 if __name__ == "__main__":

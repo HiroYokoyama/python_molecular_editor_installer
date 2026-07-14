@@ -30,7 +30,7 @@ jobs:
 
       - name: Install package and test dependencies
         run: |
-          pip install pyshortcuts pytest pytest-mock pytest-cov
+          pip install pyshortcuts textual pytest pytest-mock pytest-cov
           pip install -e "moleditpy-installer/" --no-deps
 
       - name: Run tests
@@ -67,7 +67,7 @@ jobs:
           moleditpy --version
 
       - name: Run installer
-        run: moleditpy-installer
+        run: moleditpy-installer --desktop
 
       - name: Verify app bundle
         run: |
@@ -130,7 +130,7 @@ jobs:
 
       - name: Run installer
         shell: bash
-        run: moleditpy-installer
+        run: moleditpy-installer --desktop
 
       - name: Verify shortcuts and registry
         shell: bash
@@ -187,7 +187,7 @@ jobs:
           moleditpy --version
 
       - name: Run installer
-        run: moleditpy-installer
+        run: moleditpy-installer --desktop
 
       - name: Install desktop tooling
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shared-mime-info libglib2.0-bin
@@ -219,4 +219,22 @@ jobs:
           test ! -f "$HOME/.local/share/applications/MoleditPy.desktop"
           test ! -f "$HOME/.local/share/mime/packages/moleditpy.xml"
           test ! -f "$HOME/.local/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png"
+
+      - name: Verify system-wide install and remove (sudo)
+        run: |
+          set -x
+          sudo "$(which moleditpy-installer)" --system
+          test -f /usr/share/applications/MoleditPy.desktop
+          grep -x 'MimeType=application/x-moleditpy-project;' /usr/share/applications/MoleditPy.desktop
+          grep -x 'Terminal=true' /usr/share/applications/MoleditPy.desktop
+          test -f /usr/share/mime/packages/moleditpy.xml
+          test -f /usr/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png
+          # without root, --system must fail with a clear error
+          if moleditpy-installer --system --no-tui; then
+            echo "--system without root must fail" && exit 1
+          fi
+          sudo "$(which moleditpy-installer)" --remove --system
+          test ! -f /usr/share/applications/MoleditPy.desktop
+          test ! -f /usr/share/mime/packages/moleditpy.xml
+          test ! -f /usr/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png
 
