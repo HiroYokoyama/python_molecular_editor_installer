@@ -725,6 +725,89 @@ class TestRegisterFileAssociationsWindows:
 
 
 # ---------------------------------------------------------------------------
+# register_file_associations_darwin
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterFileAssociationsDarwin:
+    def test_returns_false_on_non_darwin(self, tmp_path):
+        with mock.patch("platform.system", return_value="Linux"):
+            assert installer_main.register_file_associations_darwin(tmp_path) is False
+
+    def test_returns_false_when_plist_missing(self, tmp_path):
+        with mock.patch("platform.system", return_value="Darwin"):
+            assert installer_main.register_file_associations_darwin(tmp_path) is False
+
+    def test_adds_file_association_to_plist(self, tmp_path):
+        app_path = tmp_path / "MoleditPy.app"
+        contents_path = app_path / "Contents"
+        contents_path.mkdir(parents=True)
+        plist_path = contents_path / "Info.plist"
+
+        import plistlib
+
+        initial_plist = {"CFBundleIdentifier": "com.moleditpy"}
+        with open(plist_path, "wb") as fp:
+            plistlib.dump(initial_plist, fp)
+
+        with mock.patch("platform.system", return_value="Darwin"):
+            result = installer_main.register_file_associations_darwin(app_path)
+
+        assert result is True
+        with open(plist_path, "rb") as fp:
+            pl = plistlib.load(fp)
+
+        assert "CFBundleDocumentTypes" in pl
+        doc_types = pl["CFBundleDocumentTypes"]
+        assert len(doc_types) == 1
+        assert "pmeprj" in doc_types[0]["CFBundleTypeExtensions"]
+
+    def test_does_not_duplicate_existing_association(self, tmp_path):
+        app_path = tmp_path / "MoleditPy.app"
+        contents_path = app_path / "Contents"
+        contents_path.mkdir(parents=True)
+        plist_path = contents_path / "Info.plist"
+
+        import plistlib
+
+        initial_plist = {
+            "CFBundleIdentifier": "com.moleditpy",
+            "CFBundleDocumentTypes": [
+                {
+                    "CFBundleTypeExtensions": ["pmeprj"],
+                    "CFBundleTypeName": "MoleditPy Project File",
+                    "CFBundleTypeRole": "Editor",
+                    "LSHandlerRank": "Owner",
+                }
+            ],
+        }
+        with open(plist_path, "wb") as fp:
+            plistlib.dump(initial_plist, fp)
+
+        with mock.patch("platform.system", return_value="Darwin"):
+            result = installer_main.register_file_associations_darwin(app_path)
+
+        assert result is True
+        with open(plist_path, "rb") as fp:
+            pl = plistlib.load(fp)
+
+        assert len(pl["CFBundleDocumentTypes"]) == 1
+
+    def test_returns_false_on_load_error(self, tmp_path):
+        app_path = tmp_path / "MoleditPy.app"
+        contents_path = app_path / "Contents"
+        contents_path.mkdir(parents=True)
+        plist_path = contents_path / "Info.plist"
+        # Write invalid plist data
+        plist_path.write_bytes(b"invalid data")
+
+        with mock.patch("platform.system", return_value="Darwin"):
+            result = installer_main.register_file_associations_darwin(app_path)
+
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
 # delete_registry_tree
 # ---------------------------------------------------------------------------
 
@@ -936,6 +1019,7 @@ class TestInstall:
         _, kwargs = mock_shortcut.call_args
         assert kwargs.get("startmenu") is True
         assert kwargs.get("desktop") is True
+
     def test_install_calls_make_shortcut_on_linux(self, tmp_path):
         fake_exe = str(tmp_path / "moleditpy")
 

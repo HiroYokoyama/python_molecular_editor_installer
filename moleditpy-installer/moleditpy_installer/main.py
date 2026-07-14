@@ -337,6 +337,69 @@ def register_file_associations_windows(exe_path: str, icon_path: Optional[str]) 
         return False
 
 
+def register_file_associations_darwin(app_path: Path) -> bool:
+    """
+    Register file associations for .pmeprj files in the Info.plist of the macOS app bundle.
+
+    Args:
+        app_path (Path): Path to the .app bundle directory.
+
+    Returns:
+        bool: True if successful, False otherwise.
+    """
+    if platform.system() != "Darwin":
+        return False
+
+    plist_path = app_path / "Contents" / "Info.plist"
+    if not plist_path.exists():
+        print(f"Warning: Info.plist not found at {plist_path}")
+        return False
+
+    import plistlib
+
+    try:
+        with open(plist_path, "rb") as fp:
+            pl = plistlib.load(fp)
+
+        doc_types = pl.get("CFBundleDocumentTypes", [])
+
+        # Check if already present
+        already_present = False
+        for doc in doc_types:
+            exts = doc.get("CFBundleTypeExtensions", [])
+            if "pmeprj" in exts:
+                already_present = True
+                break
+
+        if not already_present:
+            new_doc_type = {
+                "CFBundleTypeExtensions": ["pmeprj"],
+                "CFBundleTypeName": "MoleditPy Project File",
+                "CFBundleTypeRole": "Editor",
+                "LSHandlerRank": "Owner",
+            }
+            doc_types.append(new_doc_type)
+            pl["CFBundleDocumentTypes"] = doc_types
+
+            with open(plist_path, "wb") as fp:
+                plistlib.dump(pl, fp)
+
+            # Touch the app bundle to notify Launch Services of changes
+            try:
+                os.utime(str(app_path), None)
+            except Exception:
+                pass
+
+            print("Successfully registered file associations in Info.plist.")
+            return True
+
+        return True
+
+    except Exception as e:
+        print(f"Warning: Failed to update Info.plist: {e}")
+        return False
+
+
 def delete_registry_tree(key, sub_key):
     """
     Deletes a registry key and all its subkeys.
@@ -565,7 +628,9 @@ def install() -> None:
                 startmenu=True,
                 noexe=True,
             )
-            print(f"Successfully created '{shortcut_name}' in the application menu and on the Desktop.")
+            print(
+                f"Successfully created '{shortcut_name}' in the application menu and on the Desktop."
+            )
 
         elif system == "Darwin":
             print("macOS detected. Creating application shortcut...")
@@ -588,6 +653,7 @@ def install() -> None:
                     dest_dir = Path.home() / "Applications"
 
                     if src_app.exists():
+                        register_file_associations_darwin(src_app)
                         try:
                             dest_dir.mkdir(parents=True, exist_ok=True)
                             dest_app = dest_dir / target
