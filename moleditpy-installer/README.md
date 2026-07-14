@@ -4,7 +4,7 @@
 [![PyPI Version](https://img.shields.io/pypi/v/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 
-This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers file associations (Windows only).
+This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers file associations (Windows and macOS).
 
 ## How to Use
 
@@ -15,7 +15,7 @@ This package is a helper utility that automatically installs the correct version
     This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
 
 2.  **Create Shortcut**
-    After installation, run the following command in your terminal to create the shortcut in your application menu (e.g., Start Menu on Windows) and register file associations for `.pmeprj` files (Windows only).
+    After installation, run the following command in your terminal to create the shortcut in your application menu (e.g., Start Menu on Windows, Applications on macOS) and register file associations for `.pmeprj` files (Windows and macOS).
 
     > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
 
