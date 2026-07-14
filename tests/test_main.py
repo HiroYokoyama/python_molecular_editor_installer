@@ -2352,9 +2352,15 @@ class TestRemoveSystemScope:
 # TUI (textual)
 # ---------------------------------------------------------------------------
 
-textual = pytest.importorskip("textual")
+try:
+    import textual  # noqa: F401
+
+    HAS_TEXTUAL = True
+except ImportError:
+    HAS_TEXTUAL = False
 
 
+@pytest.mark.skipif(not HAS_TEXTUAL, reason="textual is not installed")
 class TestTui:
     def test_defaults_match_spec(self):
         """TUI defaults: desktop off, app menu on, file assoc on, user scope."""
