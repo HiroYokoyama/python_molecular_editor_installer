@@ -2864,6 +2864,28 @@ class TestTuiActions:
 
         asyncio.run(check())
 
+    def test_arrow_keys_move_between_buttons(self):
+        """Left/right cycle Install -> Uninstall -> Quit (with wrap-around)."""
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                assert app.focused.id == "install"
+                await pilot.press("right")
+                assert app.focused.id == "remove"
+                await pilot.press("right")
+                assert app.focused.id == "quit"
+                await pilot.press("right")
+                assert app.focused.id == "install"  # wraps
+                await pilot.press("left")
+                assert app.focused.id == "quit"
+
+        asyncio.run(check())
+
     def test_success_exit_waits_before_quitting(self):
         """Regression: the TUI must linger (EXIT_DELAY_SECONDS) after a
         successful action instead of vanishing instantly."""

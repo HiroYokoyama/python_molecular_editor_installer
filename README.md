@@ -4,7 +4,7 @@
 [![PyPI Version](https://img.shields.io/pypi/v/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 
-This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers file associations (Windows and macOS).
+This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers the `.pmeprj` double-click file association on Windows, macOS, and Linux.
 
 ![installer](img/installer.png)
 
@@ -23,7 +23,7 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer
     ```
 
-    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
+    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. Move between widgets with **Tab** / **Shift+Tab** (the arrow keys also switch between the Install / Uninstall / Quit buttons). After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
 
     **Non-interactive / scripted use** (also what runs automatically when there is no terminal):
 

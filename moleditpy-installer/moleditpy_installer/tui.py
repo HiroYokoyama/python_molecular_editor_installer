@@ -52,6 +52,11 @@ class InstallerApp(App):
     TITLE = "MoleditPy Installer"
     SUB_TITLE = f"v{installer.get_installer_version()}"
 
+    # Focus Install on start so a bare Enter runs the default install.
+    # (A plain .focus() in on_mount is overridden by the screen's
+    # auto-focus once it becomes active.)
+    AUTO_FOCUS = "#install"
+
     # Pause before auto-exit on success so the final log lines stay
     # readable in the TUI (tests shrink this to keep the suite fast).
     EXIT_DELAY_SECONDS = 2.0
@@ -141,8 +146,6 @@ class InstallerApp(App):
         self.log_line("Welcome! Pick components, then press Install.")
         if platform.system() == "Windows":
             self.log_line("Note: system-wide scope needs an administrator terminal.")
-        # Focus Install so a bare Enter starts the default installation.
-        self.query_one("#install", Button).focus()
         self.run_worker(self._detect_executable, thread=True)
 
     # ------------------------------------------------------------------ #
@@ -247,6 +250,22 @@ class InstallerApp(App):
             ),
             thread=True,
         )
+
+    def on_key(self, event) -> None:
+        """Move between the action buttons with the left/right arrow keys
+        (tab / shift+tab always work as well)."""
+        focused = self.focused
+        button_ids = ("install", "remove", "quit")
+        if (
+            event.key in ("left", "right")
+            and focused is not None
+            and focused.id in button_ids
+        ):
+            index = button_ids.index(focused.id)
+            step = 1 if event.key == "right" else -1
+            target = button_ids[(index + step) % len(button_ids)]
+            self.query_one(f"#{target}", Button).focus()
+            event.stop()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "install":
