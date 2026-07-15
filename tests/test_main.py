@@ -2864,6 +2864,27 @@ class TestTuiActions:
 
         asyncio.run(check())
 
+    def test_slow_detection_does_not_overwrite_action_status(self):
+        """Regression (flaked on CI): the executable-detection worker could
+        finish AFTER an install and clobber the 'finished' status line."""
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                from textual.widgets import Static
+
+                app._action_started = True
+                app._set_status("Install finished — exiting…")
+                # a late detection result must be ignored now
+                app._set_detect_status("moleditpy executable not found")
+                assert "finished" in str(app.query_one("#status", Static).render())
+
+        asyncio.run(check())
+
     def test_arrow_keys_move_between_buttons(self):
         """Left/right cycle Install -> Uninstall -> Quit (with wrap-around)."""
         import asyncio
@@ -2895,22 +2916,19 @@ class TestTuiActions:
 
         async def check():
             app = InstallerApp()
-            app.EXIT_DELAY_SECONDS = 0.4
+            app.EXIT_DELAY_SECONDS = 1.0
             with mock.patch.object(installer_main, "install", return_value=0):
                 async with app.run_test() as pilot:
                     await pilot.pause()
                     from textual.widgets import Button
 
-                    from textual.widgets import Static
-
                     app.query_one("#install", Button).press()
-                    status = app.query_one("#status", Static)
                     for _ in range(100):
                         await pilot.pause(0.05)
-                        if "finished" in str(status.render()):
+                        if "--- Install finished ---" in app._history:
                             break
                     # action finished but the app is still running
-                    assert "finished" in str(status.render())
+                    assert "--- Install finished ---" in app._history
                     assert app.return_value is None
                     for _ in range(100):
                         await pilot.pause(0.05)

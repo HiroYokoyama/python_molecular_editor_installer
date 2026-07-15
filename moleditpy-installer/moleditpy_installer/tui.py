@@ -119,6 +119,7 @@ class InstallerApp(App):
         self.exit_code = 0
         self._history = []
         self._show_uninstall_note = False
+        self._action_started = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -177,12 +178,18 @@ class InstallerApp(App):
             if not path and platform.system() == "Linux":
                 path = installer.find_executable("moleditpy-linux")
         if path:
-            self.call_from_thread(self._set_status, f"Found moleditpy: {path}")
+            self.call_from_thread(self._set_detect_status, f"Found moleditpy: {path}")
         else:
             self.call_from_thread(
-                self._set_status,
+                self._set_detect_status,
                 "moleditpy executable not found — install it first (pip install moleditpy)",
             )
+
+    def _set_detect_status(self, text: str) -> None:
+        # A slow detection must not overwrite the status of an install or
+        # uninstall the user has already started.
+        if not self._action_started:
+            self._set_status(text)
 
     def _run_installer_action(self, action, description: str) -> None:
         writer = _LogWriter(self)
@@ -217,6 +224,7 @@ class InstallerApp(App):
 
     def action_install(self) -> None:
         options = self._selected_options()
+        self._action_started = True
         self._set_busy(True)
         self.log_line("")
         self.log_line(
@@ -236,6 +244,7 @@ class InstallerApp(App):
 
     def action_remove(self) -> None:
         system_scope = self.query_one("#scope_system", RadioButton).value
+        self._action_started = True
         self._set_busy(True)
         self.log_line("")
         self.log_line(
