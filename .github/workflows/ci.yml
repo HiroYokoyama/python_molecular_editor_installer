@@ -216,7 +216,10 @@ jobs:
           grep -x 'MimeType=application/x-moleditpy-project;' "$DESKTOP"
           test -f "$HOME/.local/share/mime/packages/moleditpy.xml"
           grep -q 'pattern="\*.pmeprj"' "$HOME/.local/share/mime/packages/moleditpy.xml"
-          test -f "$HOME/.local/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png"
+          grep -q '<icon name="application-x-moleditpy-project"/>' "$HOME/.local/share/mime/packages/moleditpy.xml"
+          for size in 16 22 24 32 48 64 128 256; do
+            test -f "$HOME/.local/share/icons/hicolor/${size}x${size}/mimetypes/application-x-moleditpy-project.png"
+          done
           # the compiled per-user MIME database must contain our glob
           # (xdg-mime query is unreliable on a bare runner — it falls back
           # to file(1) magic, which ignores per-user glob databases)
@@ -233,7 +236,9 @@ jobs:
           moleditpy-installer --uninstall
           test ! -f "$HOME/.local/share/applications/MoleditPy.desktop"
           test ! -f "$HOME/.local/share/mime/packages/moleditpy.xml"
-          test ! -f "$HOME/.local/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png"
+          for size in 16 22 24 32 48 64 128 256; do
+            test ! -f "$HOME/.local/share/icons/hicolor/${size}x${size}/mimetypes/application-x-moleditpy-project.png"
+          done
 
       - name: Verify system-wide install and remove (sudo)
         run: |
@@ -243,7 +248,9 @@ jobs:
           grep -x 'MimeType=application/x-moleditpy-project;' /usr/share/applications/MoleditPy.desktop
           grep -x 'Terminal=true' /usr/share/applications/MoleditPy.desktop
           test -f /usr/share/mime/packages/moleditpy.xml
-          test -f /usr/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png
+          for size in 16 22 24 32 48 64 128 256; do
+            test -f "/usr/share/icons/hicolor/${size}x${size}/mimetypes/application-x-moleditpy-project.png"
+          done
           # without root, --system must fail with a clear error
           if moleditpy-installer --system --no-tui; then
             echo "--system without root must fail" && exit 1
@@ -251,5 +258,7 @@ jobs:
           sudo "$(which moleditpy-installer)" --uninstall --system
           test ! -f /usr/share/applications/MoleditPy.desktop
           test ! -f /usr/share/mime/packages/moleditpy.xml
-          test ! -f /usr/share/icons/hicolor/256x256/mimetypes/application-x-moleditpy-project.png
+          for size in 16 22 24 32 48 64 128 256; do
+            test ! -f "/usr/share/icons/hicolor/${size}x${size}/mimetypes/application-x-moleditpy-project.png"
+          done
 

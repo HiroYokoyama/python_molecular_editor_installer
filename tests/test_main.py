@@ -1995,19 +1995,32 @@ class TestLinuxFileAssociations:
         content = mime_xml.read_text(encoding="utf-8")
         assert 'type="application/x-moleditpy-project"' in content
         assert 'pattern="*.pmeprj"' in content
+        assert '<icon name="application-x-moleditpy-project"/>' in content
 
-        icon = (
-            tmp_path
-            / ".local"
-            / "share"
-            / "icons"
-            / "hicolor"
-            / "256x256"
-            / "mimetypes"
-            / "application-x-moleditpy-project.png"
-        )
-        assert icon.exists()
-        assert icon.read_bytes()[:4] == b"\x89PNG"
+        for size in installer_main._LINUX_MIME_ICON_SIZES:
+            icon = (
+                tmp_path
+                / ".local"
+                / "share"
+                / "icons"
+                / "hicolor"
+                / f"{size}x{size}"
+                / "mimetypes"
+                / "application-x-moleditpy-project.png"
+            )
+            assert icon.exists(), f"missing {size}x{size} icon"
+            assert icon.read_bytes()[:4] == b"\x89PNG"
+
+    def test_icon_cache_refresh_ignores_missing_theme_index(self):
+        """Per-user hicolor has no index.theme: without -f -t the cache
+        update fails and a stale icon-theme.cache keeps hiding the icon."""
+        with mock.patch("platform.system", return_value="Linux"):
+            installer_main.register_file_associations_linux()
+
+        run_quiet_calls = [c.args[0] for c in installer_main._run_quiet.call_args_list]
+        cache_calls = [c for c in run_quiet_calls if c[0] == "gtk-update-icon-cache"]
+        assert cache_calls
+        assert all(c[1:3] == ["-f", "-t"] for c in cache_calls)
 
     def test_sets_default_handler(self, tmp_path):
         with mock.patch("platform.system", return_value="Linux"):
@@ -2029,24 +2042,25 @@ class TestLinuxFileAssociations:
         assert not (
             tmp_path / ".local" / "share" / "mime" / "packages" / "moleditpy.xml"
         ).exists()
-        assert not (
-            tmp_path
-            / ".local"
-            / "share"
-            / "icons"
-            / "hicolor"
-            / "256x256"
-            / "mimetypes"
-            / "application-x-moleditpy-project.png"
-        ).exists()
+        for size in installer_main._LINUX_MIME_ICON_SIZES:
+            assert not (
+                tmp_path
+                / ".local"
+                / "share"
+                / "icons"
+                / "hicolor"
+                / f"{size}x{size}"
+                / "mimetypes"
+                / "application-x-moleditpy-project.png"
+            ).exists(), f"{size}x{size} icon left behind"
 
-    def test_packaged_file_icon_png_is_valid(self):
+    def test_packaged_file_icon_pngs_are_valid(self):
         import importlib.resources
 
-        ref = (
-            importlib.resources.files("moleditpy_installer") / "data" / "file_icon.png"
-        )
-        assert ref.read_bytes()[:4] == b"\x89PNG"
+        data = importlib.resources.files("moleditpy_installer") / "data"
+        for size in installer_main._LINUX_MIME_ICON_SIZES:
+            name = "file_icon.png" if size == 256 else f"file_icon_{size}.png"
+            assert (data / name).read_bytes()[:4] == b"\x89PNG", f"bad {name}"
 
 
 class TestPatchLinuxDesktopEntry:

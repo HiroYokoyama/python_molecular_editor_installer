@@ -49,6 +49,7 @@ _SYSTEM_CONDA_ROOTS = [
 # it per the freedesktop spec ('/' -> '-').
 LINUX_MIME_TYPE = "application/x-moleditpy-project"
 _LINUX_MIME_ICON_NAME = "application-x-moleditpy-project"
+_LINUX_MIME_ICON_SIZES = (16, 22, 24, 32, 48, 64, 128, 256)
 
 
 @dataclass
@@ -650,6 +651,7 @@ def register_file_associations_linux(system: bool = False) -> bool:
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="{LINUX_MIME_TYPE}">
     <comment>MoleditPy Project File</comment>
+    <icon name="{_LINUX_MIME_ICON_NAME}"/>
     <glob pattern="*.pmeprj"/>
   </mime-type>
 </mime-info>
@@ -658,15 +660,29 @@ def register_file_associations_linux(system: bool = False) -> bool:
         _run_quiet(["update-mime-database", str(mime_dir)])
 
         # 2. Document icon for the MIME type (counterpart of the Windows
-        # DefaultIcon registry value / macOS file_icon.icns)
-        icon_png = _extract_data_file("file_icon.png")
-        if icon_png:
+        # DefaultIcon registry value / macOS file_icon.icns). Every standard
+        # hicolor size: file managers request small sizes (16-64) and a
+        # 256px-only icon loses the lookup, leaving the generic blank page.
+        for size in _LINUX_MIME_ICON_SIZES:
+            data_name = "file_icon.png" if size == 256 else f"file_icon_{size}.png"
+            icon_png = _extract_data_file(data_name)
+            if not icon_png:
+                continue
             mimetypes_icon_dir = (
-                data_home / "icons" / "hicolor" / "256x256" / "mimetypes"
+                data_home / "icons" / "hicolor" / f"{size}x{size}" / "mimetypes"
             )
             mimetypes_icon_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(icon_png, mimetypes_icon_dir / f"{_LINUX_MIME_ICON_NAME}.png")
-            _run_quiet(["gtk-update-icon-cache", str(data_home / "icons" / "hicolor")])
+        # -f -t: the per-user hicolor dir has no index.theme, so the plain
+        # call fails and any stale icon-theme.cache keeps hiding the icon.
+        _run_quiet(
+            [
+                "gtk-update-icon-cache",
+                "-f",
+                "-t",
+                str(data_home / "icons" / "hicolor"),
+            ]
+        )
 
         # 3. Bind the MIME type to the .desktop entry and set it as default
         apps_dir = data_home / "applications"
@@ -717,12 +733,15 @@ def unregister_file_associations_linux(system: bool = False) -> None:
     mime_dir = data_home / "mime"
     for path in (
         mime_dir / "packages" / "moleditpy.xml",
-        data_home
-        / "icons"
-        / "hicolor"
-        / "256x256"
-        / "mimetypes"
-        / f"{_LINUX_MIME_ICON_NAME}.png",
+        *(
+            data_home
+            / "icons"
+            / "hicolor"
+            / f"{size}x{size}"
+            / "mimetypes"
+            / f"{_LINUX_MIME_ICON_NAME}.png"
+            for size in _LINUX_MIME_ICON_SIZES
+        ),
     ):
         try:
             if path.exists():
@@ -736,7 +755,9 @@ def unregister_file_associations_linux(system: bool = False) -> None:
 
     _run_quiet(["update-mime-database", str(mime_dir)])
     _run_quiet(["update-desktop-database", str(data_home / "applications")])
-    _run_quiet(["gtk-update-icon-cache", str(data_home / "icons" / "hicolor")])
+    _run_quiet(
+        ["gtk-update-icon-cache", "-f", "-t", str(data_home / "icons" / "hicolor")]
+    )
     print("File associations unregistered.")
 
 
