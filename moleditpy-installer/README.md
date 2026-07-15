@@ -1,10 +1,12 @@
-# MoleditPy Installer
+﻿# MoleditPy Installer
 
 [![CI](https://github.com/HiroYokoyama/python_molecular_editor_installer/actions/workflows/ci.yml/badge.svg)](https://github.com/HiroYokoyama/python_molecular_editor_installer/actions/workflows/ci.yml)
 [![PyPI Version](https://img.shields.io/pypi/v/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 
 This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers file associations (Windows and macOS).
+
+![installer](https://raw.githubusercontent.com/HiroYokoyama/python_molecular_editor_installer/main/img/installer.png)
 
 ## How to Use
 
@@ -15,13 +17,13 @@ This package is a helper utility that automatically installs the correct version
     This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
 
 2.  **Run the interactive installer (TUI)**
-    Run the following command in your terminal. In an interactive terminal this opens a TUI where you pick the components — Desktop shortcut, application-menu entry, `.pmeprj` file association — and the scope (per-user or system-wide), then press **Install**:
+    Run the following command in your terminal. In an interactive terminal this opens a TUI where you pick the components 窶・Desktop shortcut, application-menu entry, `.pmeprj` file association 窶・and the scope (per-user or system-wide), then press **Install**:
 
     ```bash
     moleditpy-installer
     ```
 
-    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope.
+    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
 
     **Non-interactive / scripted use** (also what runs automatically when there is no terminal):
 
@@ -35,10 +37,6 @@ This package is a helper utility that automatically installs the correct version
     Any explicit option skips the TUI.
 
     > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
-
-    ```bash
-    moleditpy-installer
-    ```
 
     You can also invoke it as a Python module (use an **underscore**, not a hyphen):
 
@@ -58,6 +56,8 @@ This package is a helper utility that automatically installs the correct version
     # or
     python -m moleditpy_installer --uninstall
     ```
+
+    > **Note:** this removes the shortcuts and file associations only. To fully remove MoleditPy itself, also run `pip uninstall moleditpy` (or `pip uninstall moleditpy-linux` on Linux).
 
 4.  **Check Executable Location**
     To search for the `moleditpy` executable in the search paths and print the located path:
@@ -93,7 +93,7 @@ This package is a helper utility that automatically installs the correct version
 ### macOS
 - A `MoleditPy.app` launcher in `~/Applications` (or `/Applications` with `--system`), plus a Desktop copy when enabled, with the MoleditPy icon.
 - The launcher pairs the `moleditpy` script with the Python interpreter of **its own environment** (detected from the adjacent interpreter or the script's shebang), so it keeps working even when the installer runs from a different environment.
-- MoleditPy always opens inside a **Terminal window**, so Python output and any errors stay visible. The first launch shows a one-time macOS consent prompt ("MoleditPy wants access to control Terminal") — click OK.
+- MoleditPy always opens inside a **Terminal window**, so Python output and any errors stay visible. The first launch shows a one-time macOS consent prompt ("MoleditPy wants access to control Terminal") 窶・click OK.
 - Double-clicking `.pmeprj` files opens MoleditPy: the app bundle declares the `com.moleditpy.pmeprj` document type (exported UTI) and is registered with Launch Services. `.pmeprj` documents get their own file icon, matching the Windows behavior.
 - The bundle is ad-hoc code-signed after configuration; required on Apple Silicon.
 
@@ -106,16 +106,16 @@ This package is a helper utility that automatically installs the correct version
 
 ## Version 3.0 highlights
 
-- **New:** interactive Textual TUI — pick components and scope, watch the log, press Install/Remove.
+- **New:** interactive Textual TUI 窶・pick components and scope, watch the log, press Install/Remove.
 - **New:** component selection (`--desktop`, `--app-menu`, `--file-assoc`) with safer defaults (no Desktop shortcut unless requested).
-- **New:** system-wide scope on Linux (`/usr/share`), macOS (`/Applications`), and Windows (HKLM + all-users Start Menu; admin terminal) — all requiring sudo/admin.
+- **New:** system-wide scope on Linux (`/usr/share`), macOS (`/Applications`), and Windows (HKLM + all-users Start Menu; admin terminal) 窶・all requiring sudo/admin.
 - Per-user Linux paths now honor `XDG_DATA_HOME`.
 - End-to-end smoke tests on all three OSes in CI, including the sudo/system path.
 
 ## Version 2.0 highlights
 
 - **Fixed:** silent launch failures on macOS caused by an invalidated app-bundle code signature (Apple Silicon refused to start the app and ignored its icon).
-- **Fixed:** `ModuleNotFoundError: No module named 'moleditpy'` when the installer ran in a different Python environment than the one holding `moleditpy` — the launcher now uses the script's own interpreter and the command is verified at install time.
+- **Fixed:** `ModuleNotFoundError: No module named 'moleditpy'` when the installer ran in a different Python environment than the one holding `moleditpy` 窶・the launcher now uses the script's own interpreter and the command is verified at install time.
 - **New:** MoleditPy launches in a visible Terminal window on macOS.
 - **New:** `.pmeprj` double-click support on macOS via a proper exported UTI + Launch Services registration.
 - **New:** `.pmeprj` double-click support and document icon on Linux (per-user MIME registration).

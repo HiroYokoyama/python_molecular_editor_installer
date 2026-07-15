@@ -52,6 +52,10 @@ class InstallerApp(App):
     TITLE = "MoleditPy Installer"
     SUB_TITLE = f"v{installer.get_installer_version()}"
 
+    # Pause before auto-exit on success so the final log lines stay
+    # readable in the TUI (tests shrink this to keep the suite fast).
+    EXIT_DELAY_SECONDS = 2.0
+
     # Compact layout: everything (including the buttons) must fit in a
     # standard 80x24 terminal — on smaller screens the buttons were pushed
     # below the fold and mouse clicks could not reach them. overflow-y
@@ -109,6 +113,7 @@ class InstallerApp(App):
         super().__init__()
         self.exit_code = 0
         self._history = []
+        self._show_uninstall_note = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -136,6 +141,8 @@ class InstallerApp(App):
         self.log_line("Welcome! Pick components, then press Install.")
         if platform.system() == "Windows":
             self.log_line("Note: system-wide scope needs an administrator terminal.")
+        # Focus Install so a bare Enter starts the default installation.
+        self.query_one("#install", Button).focus()
         self.run_worker(self._detect_executable, thread=True)
 
     # ------------------------------------------------------------------ #
@@ -190,9 +197,12 @@ class InstallerApp(App):
         self.log_line(f"--- {description} {'finished' if ok else 'FAILED'} ---")
         self.exit_code = 0 if ok else 1
         if ok:
-            # Exit on completion; run_tui() replays the log in the terminal.
+            if description == "Uninstall":
+                self._show_uninstall_note = True
+            # Linger briefly so the result is readable, then exit;
+            # run_tui() replays the log in the terminal afterwards.
             self._set_status(f"{description} finished — exiting…")
-            self.exit(self.exit_code)
+            self.set_timer(self.EXIT_DELAY_SECONDS, lambda: self.exit(self.exit_code))
         else:
             # Stay open so the options can be adjusted and retried.
             self._set_status(f"{description} FAILED — see the log, adjust and retry.")
@@ -263,4 +273,9 @@ def run_tui() -> int:
         for line in history:
             print(f"  {line}")
     print(f"Result: {'success' if code == 0 else f'FAILED (exit code {code})'}")
+    if getattr(app, "_show_uninstall_note", False):
+        print(
+            "Note: shortcuts and file associations were removed. "
+            "To fully remove MoleditPy itself, run: pip uninstall moleditpy"
+        )
     return code

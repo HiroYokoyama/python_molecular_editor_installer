@@ -886,11 +886,11 @@ class TestUnregisterFileAssociationsWindows:
 
         assert winreg_mock.DeleteKey.call_count == 2  # .pmeprj and .pmeraw
         deleted = [c.args[1] for c in mock_del.call_args_list]
-        assert "Software\Classes\MoleditPy.File" in deleted
+        assert r"Software\Classes\MoleditPy.File" in deleted
         # Explorer's per-user FileExts cache must be cleared too, or the
         # association looks still present after uninstall
         assert (
-            "Software\Microsoft\Windows\CurrentVersion\\Explorer\FileExts\.pmeprj"
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pmeprj"
         ) in deleted
 
     def test_ignores_already_missing_keys(self, capsys):
@@ -2433,6 +2433,7 @@ class TestTui:
 
         async def check():
             app = InstallerApp()
+            app.EXIT_DELAY_SECONDS = 0.05
             with mock.patch.object(
                 installer_main, "install", return_value=0
             ) as mock_install:
@@ -2443,11 +2444,11 @@ class TestTui:
                     app.query_one("#install", Button).press()
                     for _ in range(100):
                         await pilot.pause(0.05)
-                        if mock_install.called:
+                        if app.return_value == 0:
                             break
             assert mock_install.called
             assert mock_install.call_args.args[0] == installer_main.InstallOptions()
-            # success auto-exits the TUI
+            # success auto-exits the TUI (after the readability delay)
             assert app.return_value == 0
 
         asyncio.run(check())
@@ -2828,6 +2829,98 @@ class TestTuiActions:
         with mock.patch.object(tui.InstallerApp, "run", return_value=1):
             assert tui.run_tui() == 1
         assert "FAILED (exit code 1)" in capsys.readouterr().out
+
+    def test_run_tui_prints_pip_uninstall_note_after_uninstall(self, capsys):
+        from moleditpy_installer import tui
+
+        def fake_run(self):
+            self._show_uninstall_note = True
+            return 0
+
+        with mock.patch.object(tui.InstallerApp, "run", fake_run):
+            assert tui.run_tui() == 0
+        assert "pip uninstall moleditpy" in capsys.readouterr().out
+
+    def test_run_tui_no_uninstall_note_after_install(self, capsys):
+        from moleditpy_installer import tui
+
+        with mock.patch.object(tui.InstallerApp, "run", return_value=0):
+            assert tui.run_tui() == 0
+        assert "pip uninstall" not in capsys.readouterr().out
+
+    def test_install_button_focused_on_start(self):
+        """A bare Enter right after launch must start the install."""
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                from textual.widgets import Button
+
+                assert app.focused is app.query_one("#install", Button)
+
+        asyncio.run(check())
+
+    def test_success_exit_waits_before_quitting(self):
+        """Regression: the TUI must linger (EXIT_DELAY_SECONDS) after a
+        successful action instead of vanishing instantly."""
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            app.EXIT_DELAY_SECONDS = 0.4
+            with mock.patch.object(installer_main, "install", return_value=0):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from textual.widgets import Button
+
+                    from textual.widgets import Static
+
+                    app.query_one("#install", Button).press()
+                    status = app.query_one("#status", Static)
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if "finished" in str(status.render()):
+                            break
+                    # action finished but the app is still running
+                    assert "finished" in str(status.render())
+                    assert app.return_value is None
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if app.return_value == 0:
+                            break
+                    assert app.return_value == 0
+
+        asyncio.run(check())
+
+    def test_uninstall_success_sets_note_flag(self):
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            app.EXIT_DELAY_SECONDS = 0.05
+            with mock.patch.object(
+                installer_main, "remove_shortcut", return_value=None
+            ):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from textual.widgets import Button
+
+                    app.query_one("#remove", Button).press()
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if app.return_value == 0:
+                            break
+            assert app._show_uninstall_note is True
+
+        asyncio.run(check())
 
     def test_status_bar_visible_and_updated(self):
         import asyncio

@@ -23,7 +23,7 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer
     ```
 
-    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope.
+    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
 
     **Non-interactive / scripted use** (also what runs automatically when there is no terminal):
 
@@ -37,10 +37,6 @@ This package is a helper utility that automatically installs the correct version
     Any explicit option skips the TUI.
 
     > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
-
-    ```bash
-    moleditpy-installer
-    ```
 
     You can also invoke it as a Python module (use an **underscore**, not a hyphen):
 
@@ -60,6 +56,8 @@ This package is a helper utility that automatically installs the correct version
     # or
     python -m moleditpy_installer --uninstall
     ```
+
+    > **Note:** this removes the shortcuts and file associations only. To fully remove MoleditPy itself, also run `pip uninstall moleditpy` (or `pip uninstall moleditpy-linux` on Linux).
 
 4.  **Check Executable Location**
     To search for the `moleditpy` executable in the search paths and print the located path:
