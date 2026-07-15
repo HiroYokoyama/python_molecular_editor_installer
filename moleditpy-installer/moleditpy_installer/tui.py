@@ -120,6 +120,7 @@ class InstallerApp(App):
         self._history = []
         self._show_uninstall_note = False
         self._action_started = False
+        self._action_succeeded = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -207,6 +208,7 @@ class InstallerApp(App):
         self.log_line(f"--- {description} {'finished' if ok else 'FAILED'} ---")
         self.exit_code = 0 if ok else 1
         if ok:
+            self._action_succeeded = True
             if description == "Uninstall":
                 self._show_uninstall_note = True
             # Linger briefly so the result is readable, then exit;
@@ -284,6 +286,10 @@ class InstallerApp(App):
         elif event.button.id == "quit":
             self.exit(self.exit_code)
 
+    def action_quit(self) -> None:
+        # Match the Quit button: keep the exit code of a failed action.
+        self.exit(self.exit_code)
+
 
 def run_tui() -> int:
     """Run the installer TUI; returns a process exit code.
@@ -300,7 +306,13 @@ def run_tui() -> int:
         print("MoleditPy installer log:")
         for line in history:
             print(f"  {line}")
-    print(f"Result: {'success' if code == 0 else f'FAILED (exit code {code})'}")
+    if code != 0:
+        result_text = f"FAILED (exit code {code})"
+    elif getattr(app, "_action_succeeded", False):
+        result_text = "success"
+    else:
+        result_text = "quitted"
+    print(f"Result: {result_text}")
     if getattr(app, "_show_uninstall_note", False):
         print(
             "Note: shortcuts and file associations were removed. "

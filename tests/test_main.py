@@ -2812,6 +2812,7 @@ class TestTuiActions:
 
         def fake_run(self):
             self._history.extend(["line one", "line two"])
+            self._action_succeeded = True
             return 0
 
         with mock.patch.object(tui.InstallerApp, "run", fake_run):
@@ -2822,6 +2823,15 @@ class TestTuiActions:
         assert "line one" in out
         assert "line two" in out
         assert "Result: success" in out
+
+    def test_run_tui_prints_quitted_when_no_action_ran(self, capsys):
+        from moleditpy_installer import tui
+
+        with mock.patch.object(tui.InstallerApp, "run", return_value=0):
+            assert tui.run_tui() == 0
+        out = capsys.readouterr().out
+        assert "Result: quitted" in out
+        assert "Result: success" not in out
 
     def test_run_tui_prints_failure_result(self, capsys):
         from moleditpy_installer import tui
