@@ -1,4 +1,4 @@
-﻿# MoleditPy Installer
+# MoleditPy Installer
 
 [![CI](https://github.com/HiroYokoyama/python_molecular_editor_installer/actions/workflows/ci.yml/badge.svg)](https://github.com/HiroYokoyama/python_molecular_editor_installer/actions/workflows/ci.yml)
 [![PyPI Version](https://img.shields.io/pypi/v/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
