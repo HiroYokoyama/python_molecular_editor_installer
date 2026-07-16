@@ -1320,10 +1320,21 @@ def install(options: Optional[InstallOptions] = None) -> int:
             # "ModuleNotFoundError: No module named 'moleditpy'" at launch.
             mac_target_script = python_for_executable(original_exe_path)
 
+            print(
+                "Verifying the launch command — the first run can take up to a "
+                "minute while Python imports are scanned..."
+            )
             if not verify_launch_command(mac_target_script, original_exe_path):
-                if mac_target_script != sys.executable and verify_launch_command(
-                    sys.executable, original_exe_path
-                ):
+                retry_ok = False
+                if mac_target_script != sys.executable:
+                    print(
+                        f'Verification with "{mac_target_script}" failed; '
+                        "retrying with the installer's own Python..."
+                    )
+                    retry_ok = verify_launch_command(
+                        sys.executable, original_exe_path
+                    )
+                if retry_ok:
                     mac_target_script = sys.executable
                 else:
                     print(
