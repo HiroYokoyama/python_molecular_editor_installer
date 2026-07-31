@@ -12,6 +12,10 @@ python -m pytest tests/ -v --cov=moleditpy_installer --cov-report=term-missing
 
 ## Test structure
 
+An orientation map, not an inventory — `tests/test_main.py` is the authoritative
+list. Anything testable is expected to be tested, so assume a feature has
+coverage and go look for it rather than inferring from this table.
+
 | Test class / function | What it covers |
 |---|---|
 | `TestFindExecutable` | Path detection logic in `find_executable()` |
@@ -23,6 +27,17 @@ python -m pytest tests/ -v --cov=moleditpy_installer --cov-report=term-missing
 | `TestInstall` | High-level `install()` routine and macOS bundle movement |
 | `TestMainCLI` | CLI argument parsing (`--remove`, `--check`, `--version`, `--help`) |
 | `test_package_runnable_as_module` | `python -m moleditpy_installer` works |
+| `TestTui` / `TestTuiActions` | The Textual TUI: component and scope selection, focus order, arrow-key navigation between buttons, install/uninstall actions |
+| `TestInstallOptions` / `TestMainDispatch` | Component flags (`--desktop`, `--app-menu`, `--file-assoc`), the all-disabled error, and which routine each CLI form dispatches to |
+| `TestCodesignApp` / `TestCheckLaunchVerification` / `TestVerifyLaunchCommand` | macOS: re-signing the bundle after modification, and verifying it actually launches |
+| `TestDarwinUTIDeclaration` / `TestDarwinDocTypeReplacement` / `TestDarwinDocumentIcon` / `TestDarwinAppIconOverride` | macOS `.pmeprj` UTI export, document type entries, and icon handling |
+| `TestRegisterFileAssociationsDarwin` / `TestRefreshLaunchServices` | macOS Launch Services registration and refresh |
+| `TestLinuxFileAssociations` / `TestCleanLinuxMimeapps` / `TestPatchLinuxDesktopEntry` | Linux MIME registration, desktop entry, and cleanup on removal |
+| `TestLinuxDataHome` / `TestLinuxSystemDesktopEntry` | `XDG_DATA_HOME` for per-user paths, `/usr/share` for system scope |
+| `TestWindowsAssocRefresh` / `TestComInitialized` | Windows association refresh (`SHChangeNotify`) and per-thread COM initialisation |
+| `TestRemoveSystemScope` / `TestWindowsSystemRemove` | System-wide uninstall on each OS |
+| `TestPythonForExecutable` / `TestSystemCondaSearch` | Resolving the interpreter that owns the installed command |
+| `TestV301Fixes` | Regressions fixed in 3.0.1, kept as tests so they cannot come back |
 
 ### `TestFindExecutable`
 
@@ -63,6 +78,22 @@ Every path resolution test mocks `platform.system()` and file check routines so 
 ### `python -m moleditpy_installer` support
 
 `test_package_runnable_as_module` verifies the `__main__.py` module exists and is importable, which is the requirement for `python -m` to work.
+
+## CI
+
+`.github/workflows/ci.yml` runs four jobs:
+
+| Job | Matrix | What it does |
+|---|---|---|
+| `test` | ubuntu / windows / macOS × Python 3.9, 3.11, 3.13 | the pytest suite |
+| `smoke-macos` | macOS | a real end-to-end install and uninstall, per-user and system (sudo) |
+| `smoke-windows` | Windows | the same, including the registry and Start Menu paths |
+| `smoke-linux` | Ubuntu | the same, including `/usr/share` system scope |
+
+The smoke jobs matter because most of this package's work happens *outside*
+Python — code signing, registry writes, Launch Services, MIME databases. A unit
+test can only assert that the right command was constructed; the smoke jobs
+assert it actually worked on that OS.
 
 ## Invocation methods
 
