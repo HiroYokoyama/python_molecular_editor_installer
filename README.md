@@ -114,6 +114,14 @@ This package is a helper utility that automatically installs the correct version
 
 `moleditpy-installer --uninstall` undoes all of the above for the current user (add `--system` for system-wide installs).
 
+## Version 3.1 highlights
+
+- **New:** manual executable path — `--exe-path` on the command line and an **Executable path** field in the TUI, for installations the automatic search cannot find. Accepts the executable or the directory holding it; a wrong path is reported instead of being silently replaced by a search result.
+- **Fixed:** `conda run` was applied to executables belonging to a *different* environment, producing a launcher that failed with `ModuleNotFoundError: No module named 'moleditpy'`. It is now used only when the executable really lives in the active `CONDA_PREFIX`.
+- **Fixed:** system-wide installs referenced icons in the installing user's private directory (`%LOCALAPPDATA%`, or `/root/.moleditpy` under `sudo`), so other users saw a blank icon. Shared scopes now use `%PROGRAMDATA%`, `/usr/share`, and `/usr/local/share` (macOS).
+- **Fixed:** on Windows, an earlier "Open with" choice pinned by Explorer kept overriding a freshly installed `.pmeprj` association.
+- **Fixed:** `--check` named the same command twice in its failure message on Linux.
+
 ## Version 3.0 highlights
 
 - **New:** interactive Textual TUI — pick components and scope, watch the log, press Install/Remove.
