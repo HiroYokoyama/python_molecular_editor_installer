@@ -23,7 +23,7 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer
     ```
 
-    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. Move between widgets with **Tab** / **Shift+Tab** (the arrow keys also switch between the Install / Uninstall / Quit buttons). After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
+    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope, executable **auto-detected**. The **Executable path** field at the bottom of the panel is optional — leave it empty to auto-detect, or type the path to the `moleditpy` executable (or the `Scripts`/`bin` folder holding it) when your installation lives somewhere the search does not cover. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. Move between widgets with **Tab** / **Shift+Tab** (the arrow keys also switch between the Install / Uninstall / Quit buttons). After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
 
     **Non-interactive / scripted use** (also what runs automatically when there is no terminal):
 
@@ -32,9 +32,19 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer --desktop                # also create a Desktop shortcut
     moleditpy-installer --no-file-assoc          # skip the .pmeprj association
     sudo moleditpy-installer --system            # system-wide (admin terminal on Windows)
+    moleditpy-installer --exe-path /opt/env/bin/moleditpy   # point at the executable yourself
     ```
 
     Any explicit option skips the TUI.
+
+    **Manual executable path.** If the automatic search cannot find your installation, pass `--exe-path` (or fill in the TUI field). It accepts the executable itself or the directory holding it, expands `~` and environment variables, and strips surrounding quotes:
+
+    ```bash
+    moleditpy-installer --exe-path "~/my envs/chem/bin"        # a Scripts/bin directory
+    moleditpy-installer --check --exe-path C:\envs\chem\Scripts\moleditpy.exe
+    ```
+
+    A path given this way is never silently replaced by a search result: if it is wrong, the installer reports why and stops.
 
     > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
 
@@ -65,7 +75,7 @@ This package is a helper utility that automatically installs the correct version
     ```bash
     moleditpy-installer --check
     ```
-    This command returns exit code `0` if the executable is found, and `1` otherwise. On macOS it additionally verifies that the launcher's interpreter/script pairing can actually start MoleditPy.
+    This command returns exit code `0` if the executable is found, and `1` otherwise. On macOS it additionally verifies that the launcher's interpreter/script pairing can actually start MoleditPy. Add `--exe-path <path>` to validate a specific location instead of searching.
 
     For the complete list of directories scanned on Windows, macOS, and Linux, see [docs/path.md](docs/path.md).
 

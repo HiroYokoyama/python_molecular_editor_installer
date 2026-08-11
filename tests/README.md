@@ -38,6 +38,9 @@ coverage and go look for it rather than inferring from this table.
 | `TestRemoveSystemScope` / `TestWindowsSystemRemove` | System-wide uninstall on each OS |
 | `TestPythonForExecutable` / `TestSystemCondaSearch` | Resolving the interpreter that owns the installed command |
 | `TestV301Fixes` | Regressions fixed in 3.0.1, kept as tests so they cannot come back |
+| `TestResolveManualExecutable` / `TestInstallWithManualExePath` / `TestExePathCLI` / `TestTuiExePathField` | The manual executable path: validation (file, directory, quotes, env vars, bad input), `--exe-path` on install and `--check`, and the TUI field |
+| `TestCondaPrefixMismatch` | `conda run` is only used when the executable really lives in the active `CONDA_PREFIX` |
+| `TestSystemScopeDataDir` / `TestWindowsUserChoice` | System-scope icon location (shared, not the installing root's home) and clearing Explorer's pinned "open with" choice |
 
 ### `TestFindExecutable`
 
@@ -104,6 +107,10 @@ python -m moleditpy_installer  # module invocation (also works)
 
 # Check executable path:
 moleditpy-installer --check
+moleditpy-installer --check --exe-path /path/to/moleditpy   # validate a specific path
+
+# Install using a manually specified executable (skips the search):
+moleditpy-installer --exe-path /path/to/moleditpy
 
 # Print version:
 moleditpy-installer --version

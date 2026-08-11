@@ -1342,9 +1342,11 @@ class TestInstall:
     def test_install_prefers_conda_prefix_over_env_name(self, tmp_path):
         """CONDA_PREFIX (-p) is preferred: CONDA_DEFAULT_ENV may be a path
         for envs activated by path, where -n would not resolve."""
-        fake_exe = str(tmp_path / "moleditpy.exe")
+        fake_prefix = tmp_path / "envs" / "myenv"
+        (fake_prefix / "Scripts").mkdir(parents=True)
+        fake_exe = str(fake_prefix / "Scripts" / "moleditpy.exe")
         fake_conda = str(tmp_path / "conda.exe")
-        fake_prefix = str(tmp_path / "envs" / "myenv")
+        fake_prefix = str(fake_prefix)
 
         env = {
             "CONDA_DEFAULT_ENV": "myenv",
@@ -3198,3 +3200,421 @@ class TestWindowsSystemRemove:
         assert not (tmp_path / "Public/Desktop/MoleditPy.lnk").exists()
         # user-level AND system-level (HKLM) registrations removed
         assert mock.call(system=True) in mock_unreg.call_args_list
+
+
+# ---------------------------------------------------------------------------
+# Manual executable path (--exe-path / TUI field)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveManualExecutable:
+    def test_accepts_the_executable_itself(self, tmp_path):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+        assert installer_main.resolve_manual_executable(str(exe)) == str(exe.resolve())
+
+    def test_accepts_the_directory_holding_it(self, tmp_path):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+        assert installer_main.resolve_manual_executable(str(tmp_path)) == str(
+            exe.resolve()
+        )
+
+    def test_directory_finds_moleditpy_linux(self, tmp_path):
+        """On Linux the package installs as 'moleditpy-linux'."""
+        exe = _make_fake_exe(tmp_path, "moleditpy-linux")
+        assert installer_main.resolve_manual_executable(str(tmp_path)) == str(
+            exe.resolve()
+        )
+
+    def test_strips_quotes(self, tmp_path):
+        """A path pasted from a file manager arrives quoted."""
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+        assert installer_main.resolve_manual_executable('  "' + str(exe) + '" ') == str(
+            exe.resolve()
+        )
+
+    def test_expands_env_vars(self, tmp_path):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+        with mock.patch.dict(os.environ, {"MEP_TEST_DIR": str(tmp_path)}):
+            assert installer_main.resolve_manual_executable(
+                os.path.join("$MEP_TEST_DIR", exe.name)
+            ) == str(exe.resolve())
+
+    def test_rejects_missing_path(self, tmp_path, capsys):
+        assert installer_main.resolve_manual_executable(str(tmp_path / "nope")) is None
+        assert "does not exist" in capsys.readouterr().out
+
+    def test_rejects_empty_path(self, capsys):
+        assert installer_main.resolve_manual_executable("   ") is None
+        assert "no executable path" in capsys.readouterr().out
+
+    def test_rejects_directory_without_executable(self, tmp_path, capsys):
+        assert installer_main.resolve_manual_executable(str(tmp_path)) is None
+        assert "executable inside" in capsys.readouterr().out
+
+    def test_rejects_non_executable_file(self, tmp_path, capsys):
+        target = tmp_path / "notes.txt"
+        target.write_text("x", encoding="utf-8")
+        # os.access(X_OK) is always True for existing files on Windows
+        with mock.patch("os.access", return_value=False):
+            assert installer_main.resolve_manual_executable(str(target)) is None
+        assert "not an executable file" in capsys.readouterr().out
+
+
+class TestInstallWithManualExePath:
+    def test_manual_path_skips_the_search(self, tmp_path):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable") as mock_find,
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main, "register_file_associations_linux", return_value=True
+            ),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            code = installer_main.install(
+                installer_main.InstallOptions(exe_path=str(exe))
+            )
+
+        assert code == 0
+        assert not mock_find.called
+        script_arg = (
+            mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
+        )
+        assert script_arg == str(exe.resolve())
+
+    def test_manual_directory_is_accepted(self, tmp_path):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+
+        with (
+            mock.patch.object(installer_main, "find_executable") as mock_find,
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main, "register_file_associations_linux", return_value=True
+            ),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            code = installer_main.install(
+                installer_main.InstallOptions(exe_path=str(tmp_path))
+            )
+
+        assert code == 0
+        assert not mock_find.called
+        script_arg = (
+            mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
+        )
+        assert script_arg == str(exe.resolve())
+
+    def test_bad_manual_path_aborts_without_falling_back(self, tmp_path, capsys):
+        """A typo must be reported, never silently replaced by a search hit."""
+        with (
+            mock.patch.object(installer_main, "find_executable") as mock_find,
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+        ):
+            code = installer_main.install(
+                installer_main.InstallOptions(exe_path=str(tmp_path / "typo"))
+            )
+
+        assert code == 1
+        assert not mock_find.called
+        assert not mock_shortcut.called
+        assert "does not exist" in capsys.readouterr().out
+
+    def test_search_failure_suggests_the_manual_path(self, capsys):
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=None),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+        ):
+            assert installer_main.install() == 1
+        assert "--exe-path" in capsys.readouterr().out
+
+
+class TestCondaPrefixMismatch:
+    """`conda run -p <active prefix>` on a script from a DIFFERENT env builds
+    a launcher that dies with ModuleNotFoundError."""
+
+    def test_exe_outside_active_prefix_is_launched_directly(self, tmp_path, capsys):
+        other_env = tmp_path / "other"
+        other_env.mkdir()
+        exe = _make_fake_exe(other_env, "moleditpy")
+        prefix = tmp_path / "envs" / "myenv"
+        prefix.mkdir(parents=True)
+
+        env = {
+            "CONDA_DEFAULT_ENV": "myenv",
+            "CONDA_EXE": str(tmp_path / "conda.exe"),
+            "CONDA_PREFIX": str(prefix),
+        }
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=str(exe)),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main, "register_file_associations_linux", return_value=True
+            ),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            assert installer_main.install() == 0
+
+        script_arg = (
+            mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
+        )
+        assert "conda" not in script_arg
+        assert script_arg == str(exe)
+        assert "outside the active conda environment" in capsys.readouterr().out
+
+    def test_exe_inside_active_prefix_still_uses_conda_run(self, tmp_path):
+        prefix = tmp_path / "envs" / "myenv"
+        bin_dir = prefix / "bin"
+        bin_dir.mkdir(parents=True)
+        exe = _make_fake_exe(bin_dir, "moleditpy")
+
+        env = {
+            "CONDA_DEFAULT_ENV": "myenv",
+            "CONDA_EXE": str(tmp_path / "conda.exe"),
+            "CONDA_PREFIX": str(prefix),
+        }
+
+        with (
+            mock.patch.object(installer_main, "find_executable", return_value=str(exe)),
+            mock.patch.object(installer_main, "get_icon_path", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main, "register_file_associations_linux", return_value=True
+            ),
+            mock.patch("moleditpy_installer.main.make_shortcut") as mock_shortcut,
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            assert installer_main.install() == 0
+
+        script_arg = (
+            mock_shortcut.call_args[1].get("script") or mock_shortcut.call_args[0][0]
+        )
+        assert 'run -p "' + str(prefix) + '"' in script_arg
+
+    def test_no_conda_prefix_keeps_env_name_form(self, tmp_path):
+        """Without CONDA_PREFIX there is nothing to compare, so -n is kept."""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            assert installer_main._is_in_active_conda_env(str(tmp_path / "x")) is True
+
+
+class TestExePathCLI:
+    def test_exe_path_flag_reaches_install_options(self, tmp_path):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+        with (
+            mock.patch.object(sys, "argv", ["prog", "--exe-path", str(exe)]),
+            mock.patch.object(
+                installer_main, "install", return_value=0
+            ) as mock_install,
+            mock.patch.object(installer_main, "_tui_available", return_value=True),
+        ):
+            assert installer_main.main() == 0
+
+        # an explicit --exe-path skips the TUI, like every other option
+        assert mock_install.call_args.args[0].exe_path == str(exe)
+
+    def test_check_with_exe_path_succeeds(self, tmp_path, capsys):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+        with (
+            mock.patch.object(sys, "argv", ["prog", "--check", "--exe-path", str(exe)]),
+            mock.patch.object(installer_main, "find_executable") as mock_find,
+            mock.patch("platform.system", return_value="Linux"),
+        ):
+            assert installer_main.main() == 0
+        assert not mock_find.called
+        assert "Found executable" in capsys.readouterr().out
+
+    def test_check_with_bad_exe_path_fails(self, tmp_path, capsys):
+        with (
+            mock.patch.object(
+                sys, "argv", ["prog", "--check", "--exe-path", str(tmp_path / "nope")]
+            ),
+            mock.patch("platform.system", return_value="Linux"),
+        ):
+            assert installer_main.main() == 1
+        assert "not a usable executable" in capsys.readouterr().out
+
+    def test_check_failure_message_names_both_commands(self, capsys):
+        """The Linux fallback reassigned the name, so the error read
+        "'moleditpy-linux' (or 'moleditpy-linux')"."""
+        with (
+            mock.patch.object(sys, "argv", ["prog", "--check"]),
+            mock.patch.object(installer_main, "find_executable", return_value=None),
+            mock.patch("platform.system", return_value="Linux"),
+        ):
+            assert installer_main.main() == 1
+
+        out = capsys.readouterr().out
+        assert "'moleditpy' (or 'moleditpy-linux')" in out
+        assert "--exe-path" in out
+
+
+# ---------------------------------------------------------------------------
+# System-scope icon location and Explorer's pinned file-type choice
+# ---------------------------------------------------------------------------
+
+
+class TestSystemScopeDataDir:
+    def test_linux_system_scope_uses_usr_share(self):
+        """A /usr/share desktop entry must not point at the installing
+        root's private home, which no other user can read."""
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("pathlib.Path.mkdir"),
+        ):
+            path = installer_main.get_persistent_data_dir(system=True)
+        assert path == Path("/usr/share/moleditpy/installer")
+
+    def test_darwin_system_scope_avoids_sip_protected_usr(self):
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("pathlib.Path.mkdir"),
+        ):
+            path = installer_main.get_persistent_data_dir(system=True)
+        assert path == Path("/usr/local/share/moleditpy/installer")
+
+    def test_user_scope_unchanged(self, tmp_path):
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            path = installer_main.get_persistent_data_dir()
+        assert path == tmp_path / ".moleditpy" / "installer"
+
+    def test_get_icon_path_forwards_system_scope(self):
+        with (
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main, "_extract_data_file", return_value="/x/icon.png"
+            ) as mock_extract,
+        ):
+            installer_main.get_icon_path(system_scope=True)
+        assert mock_extract.call_args == mock.call("icon.png", system=True)
+
+    def test_install_asks_for_the_system_icon_location(self, tmp_path):
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+        with (
+            mock.patch.object(
+                installer_main, "get_icon_path", return_value=None
+            ) as mock_icon,
+            mock.patch.object(installer_main, "is_root", return_value=True),
+            mock.patch("platform.system", return_value="Linux"),
+            mock.patch.object(
+                installer_main, "register_file_associations_linux", return_value=True
+            ),
+            mock.patch.object(installer_main, "write_linux_system_desktop_entry"),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            installer_main.install(
+                installer_main.InstallOptions(system=True, exe_path=str(exe))
+            )
+        assert mock_icon.call_args == mock.call(system_scope=True)
+
+
+class TestWindowsUserChoice:
+    def test_install_clears_explorers_pinned_choice(self):
+        """A stale UserChoice overrides Software\\Classes, so the freshly
+        written ProgID would never take effect."""
+        winreg_mock = _make_winreg_mock()
+
+        with (
+            mock.patch("platform.system", return_value="Windows"),
+            mock.patch.object(installer_main, "winreg", winreg_mock),
+            mock.patch.object(
+                installer_main, "delete_registry_tree", return_value=True
+            ) as mock_delete,
+        ):
+            assert (
+                installer_main.register_file_associations_windows(
+                    "C:\\app\\moleditpy.exe", None
+                )
+                is True
+            )
+
+        deleted = [call.args[1] for call in mock_delete.call_args_list]
+        assert any(p.endswith("FileExts\\.pmeprj\\UserChoice") for p in deleted)
+        assert all(
+            call.args[0] == winreg_mock.HKEY_CURRENT_USER
+            for call in mock_delete.call_args_list
+        )
+
+
+@pytest.mark.skipif(not HAS_TEXTUAL, reason="textual is not installed")
+class TestTuiExePathField:
+    def test_empty_field_means_auto_detect(self):
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test() as pilot:
+                from textual.widgets import Input
+
+                assert app.query_one("#exe_path", Input).value == ""
+                assert app._selected_options().exe_path is None
+                await pilot.pause()
+
+        asyncio.run(check())
+
+    def test_typed_path_reaches_install_options(self, tmp_path):
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        exe = _make_fake_exe(tmp_path, "moleditpy")
+
+        async def check():
+            app = InstallerApp()
+            app.EXIT_DELAY_SECONDS = 0.05
+            with mock.patch.object(
+                installer_main, "install", return_value=0
+            ) as mock_install:
+                async with app.run_test() as pilot:
+                    from textual.widgets import Button, Input
+
+                    # surrounding whitespace must not reach the installer
+                    app.query_one("#exe_path", Input).value = f"  {exe}  "
+                    await pilot.pause()
+                    app.query_one("#install", Button).press()
+                    for _ in range(100):
+                        await pilot.pause(0.05)
+                        if app.return_value == 0:
+                            break
+
+            assert mock_install.call_args.args[0].exe_path == str(exe)
+
+        asyncio.run(check())
+
+    def test_field_fits_the_default_terminal(self):
+        """Everything (buttons included) must stay inside 80x24."""
+        import asyncio
+
+        from moleditpy_installer.tui import InstallerApp
+
+        async def check():
+            app = InstallerApp()
+            async with app.run_test(size=(80, 24)) as pilot:
+                from textual.widgets import Button, Input
+
+                await pilot.pause()
+                for widget_id, widget_type in (
+                    ("exe_path", Input),
+                    ("install", Button),
+                    ("remove", Button),
+                    ("quit", Button),
+                ):
+                    region = app.query_one(f"#{widget_id}", widget_type).region
+                    assert region.height > 0, widget_id
+                    assert region.bottom <= 24, widget_id
+
+        asyncio.run(check())

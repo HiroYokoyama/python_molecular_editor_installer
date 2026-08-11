@@ -6,6 +6,18 @@ The installer scans these paths sequentially and returns the first valid, execut
 
 ---
 
+## 0. Manual override (`--exe-path` / TUI field)
+When a path is given explicitly, **no search happens at all**: it is validated and used as-is, or the install stops with the reason. The value may be
+
+* the executable itself (`.../bin/moleditpy`, `...\Scripts\moleditpy.exe`), or
+* the directory holding it, which is probed for `moleditpy` and `moleditpy-linux` (with and without `.exe`).
+
+`~` and environment variables are expanded, and surrounding quotes are stripped.
+
+Additionally, when the installer runs inside an activated conda environment but the resolved executable lives **outside** `CONDA_PREFIX`, the `conda run` wrapper is skipped and the executable is launched directly — wrapping a foreign script in `conda run -p <active prefix>` produces a launcher that fails with `ModuleNotFoundError: No module named 'moleditpy'`.
+
+---
+
 ## 1. Interpreter-Relative Directories (All OS)
 The installer first checks directories relative to the running Python interpreter (`sys.executable`). This is highly reliable for virtual environments and conda environments.
 * Sibling `Scripts` or `bin` directory (e.g. `path/to/python/parent/Scripts` or `path/to/python/parent/bin`)
