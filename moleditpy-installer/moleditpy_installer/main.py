@@ -58,13 +58,14 @@ class InstallOptions:
     What to install and at which level.
 
     Defaults: no Desktop shortcut, application-menu entry on, .pmeprj
-    file association on, per-user scope.
+    file association on, per-user scope, auto-detected executable.
     """
 
     desktop: bool = False
     app_menu: bool = True
     file_assoc: bool = True
     system: bool = False  # system-wide (sudo/admin) instead of per-user
+    exe_path: Optional[str] = None  # manual executable path; None = auto-detect
 
 
 @contextlib.contextmanager
@@ -133,6 +134,16 @@ def get_persistent_data_dir(system: bool = False) -> Path:
                 Path.home() / "AppData" / "Local"
             )
         data_dir = Path(base) / "MoleditPy" / "installer"
+    elif system:
+        # Every user must be able to read icons referenced from a
+        # system-wide entry; the installing root's home is unreadable to
+        # them. /usr is SIP-protected on macOS, so use /usr/local there.
+        base_dir = (
+            Path("/usr/share")
+            if platform.system() == "Linux"
+            else Path("/usr/local/share")
+        )
+        data_dir = base_dir / "moleditpy" / "installer"
     else:
         data_dir = Path.home() / ".moleditpy" / "installer"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -152,9 +163,13 @@ def _extract_data_file(file_name: str, system: bool = False) -> Optional[str]:
         return None
 
 
-def get_icon_path() -> Optional[str]:
+def get_icon_path(system_scope: bool = False) -> Optional[str]:
     """
     Gets the absolute path to the correct icon file based on the OS.
+
+    Args:
+        system_scope (bool): Extract to the shared (all-users) location
+            instead of the per-user one.
 
     Returns:
         Optional[str]: The path to the icon file, or None if not found or OS unsupported.
@@ -171,7 +186,7 @@ def get_icon_path() -> Optional[str]:
         print(f"Warning: Unsupported operating system for icon selection: {system}")
         return None
 
-    return _extract_data_file(icon_name)
+    return _extract_data_file(icon_name, system=system_scope)
 
 
 def find_executable(name: str) -> Optional[str]:
@@ -404,6 +419,93 @@ def find_executable(name: str) -> Optional[str]:
     return None
 
 
+#: Executable names shipped by the moleditpy packages, in preference order.
+EXECUTABLE_NAMES = ("moleditpy", "moleditpy-linux")
+
+
+def resolve_manual_executable(raw_path: str) -> Optional[str]:
+    """
+    Validate a user-supplied path to the moleditpy executable.
+
+    Accepts either the executable itself or the directory holding it (a
+    ``Scripts``/``bin`` folder), expanding ``~`` and environment variables.
+    Surrounding quotes are stripped, so a path pasted from a file manager
+    works as-is.
+
+    Args:
+        raw_path (str): The path typed by the user.
+
+    Returns:
+        Optional[str]: The absolute path to the executable, or None if the
+        path is unusable (the reason is printed).
+    """
+    text = str(raw_path).strip().strip('"').strip("'").strip()
+    if not text:
+        print("Error: no executable path was given.")
+        return None
+
+    candidate = Path(os.path.expandvars(text)).expanduser()
+    if not candidate.exists():
+        print(f"Error: the specified path does not exist: {candidate}")
+        return None
+
+    if candidate.is_dir():
+        # Both spellings are probed on every OS: the plain name never
+        # exists on Windows, and '.exe' never exists on POSIX.
+        for name in EXECUTABLE_NAMES:
+            for exe in (candidate / name, candidate / f"{name}.exe"):
+                if exe.is_file() and os.access(exe, os.X_OK):
+                    return str(exe.resolve())
+        print(
+            f"Error: no '{EXECUTABLE_NAMES[0]}' executable inside the "
+            f"directory: {candidate}"
+        )
+        return None
+
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        print(f"Error: the specified path is not an executable file: {candidate}")
+        return None
+
+    return str(candidate.resolve())
+
+
+def _is_in_active_conda_env(exe_path: str) -> bool:
+    """
+    True when *exe_path* belongs to the currently active conda environment.
+
+    Wrapping a script from a DIFFERENT environment in
+    ``conda run -p <active prefix>`` builds a launcher that dies with
+    "ModuleNotFoundError: No module named 'moleditpy'", so the wrapper is
+    only used when the script really lives in that prefix. Without
+    CONDA_PREFIX there is nothing to compare against, so the caller's
+    ``-n <env>`` form is kept.
+    """
+    prefix = os.environ.get("CONDA_PREFIX")
+    if not prefix:
+        return True
+    try:
+        Path(exe_path).resolve().relative_to(Path(prefix).resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _clear_windows_user_choice(ext: str) -> None:
+    """
+    Drop Explorer's pinned "open with" choice for *ext*.
+
+    A UserChoice left by an earlier association (or a manual "Open with")
+    overrides Software\\Classes, so the freshly written ProgID would be
+    ignored and double-click would still open the old application.
+    """
+    key_path = (
+        "Software\\Microsoft\\Windows\\CurrentVersion\\"
+        f"Explorer\\FileExts\\{ext}\\UserChoice"
+    )
+    if delete_registry_tree(winreg.HKEY_CURRENT_USER, key_path):
+        print(f"  Cleared Explorer's previous 'open with' choice for {ext}")
+
+
 def _notify_windows_assoc_changed() -> None:
     """
     Tell Explorer the file associations changed.
@@ -481,6 +583,7 @@ def register_file_associations_windows(
             with winreg.CreateKey(root, f"Software\\Classes\\{ext}") as key:
                 winreg.SetValue(key, "", winreg.REG_SZ, prog_id)
             print(f"  Associated {ext} with {app_name}")
+            _clear_windows_user_choice(ext)
 
         _notify_windows_assoc_changed()
         print("File associations registered successfully.")
@@ -665,7 +768,7 @@ def register_file_associations_linux(system: bool = False) -> bool:
         # 256px-only icon loses the lookup, leaving the generic blank page.
         for size in _LINUX_MIME_ICON_SIZES:
             data_name = "file_icon.png" if size == 256 else f"file_icon_{size}.png"
-            icon_png = _extract_data_file(data_name)
+            icon_png = _extract_data_file(data_name, system=system)
             if not icon_png:
                 continue
             mimetypes_icon_dir = (
@@ -1193,10 +1296,10 @@ def install(options: Optional[InstallOptions] = None) -> int:
             print("Re-run with sudo, or drop --system for a per-user install.")
         return 1
 
-    command_name = "moleditpy"
+    command_name = EXECUTABLE_NAMES[0]
 
     # 1. Get Icon
-    icon_path = get_icon_path()
+    icon_path = get_icon_path(system_scope=options.system)
 
     if not icon_path:
         print(
@@ -1209,25 +1312,55 @@ def install(options: Optional[InstallOptions] = None) -> int:
     conda_env = os.environ.get("CONDA_DEFAULT_ENV")
     conda_exe = os.environ.get("CONDA_EXE")
 
-    print(f"Searching for the executable '{command_name}'...")
-    original_exe_path = find_executable(command_name)
+    if options.exe_path:
+        print(f"Manually specified executable path: {options.exe_path}")
+        original_exe_path = resolve_manual_executable(options.exe_path)
+        if not original_exe_path:
+            print(
+                "Aborting: correct the executable path (or clear it to "
+                "auto-detect) and try again."
+            )
+            return 1
+        command_name = Path(original_exe_path).stem or command_name
+        print(f"Using executable: {original_exe_path}")
+    else:
+        print(f"Searching for the executable '{command_name}'...")
+        original_exe_path = find_executable(command_name)
 
-    # On Linux the package may install as 'moleditpy-linux' instead of 'moleditpy'
-    if not original_exe_path and platform.system() == "Linux":
-        alt_name = "moleditpy-linux"
-        print(f"Not found. Trying alternate name '{alt_name}'...")
-        original_exe_path = find_executable(alt_name)
-        if original_exe_path:
-            command_name = alt_name
+        # On Linux the package may install as 'moleditpy-linux' instead of 'moleditpy'
+        if not original_exe_path and system == "Linux":
+            alt_name = EXECUTABLE_NAMES[1]
+            print(f"Not found. Trying alternate name '{alt_name}'...")
+            original_exe_path = find_executable(alt_name)
+            if original_exe_path:
+                command_name = alt_name
 
-    if not original_exe_path:
-        print(f"Error: Command '{command_name}' (or 'moleditpy-linux') not found.")
-        print("Please ensure the package is installed correctly and that")
-        print("its Scripts/bin directory is accessible.")
-        return 1
+        if not original_exe_path:
+            print(
+                f"Error: Command '{EXECUTABLE_NAMES[0]}' "
+                f"(or '{EXECUTABLE_NAMES[1]}') not found."
+            )
+            print("Please ensure the package is installed correctly and that")
+            print("its Scripts/bin directory is accessible.")
+            print(
+                "If it is installed somewhere the search does not cover, "
+                "pass its path with --exe-path (or type it in the TUI)."
+            )
+            return 1
+
+    use_conda_run = bool(conda_env and conda_exe)
+    if use_conda_run and not _is_in_active_conda_env(original_exe_path):
+        # Wrapping a foreign script in `conda run -p <active prefix>` yields
+        # a launcher that dies with ModuleNotFoundError.
+        print(
+            f"Note: '{original_exe_path}' is outside the active conda "
+            f"environment ({conda_env}); launching it directly instead of "
+            "through 'conda run'."
+        )
+        use_conda_run = False
 
     # If Conda environment
-    if conda_env and conda_exe:
+    if use_conda_run:
         print(f"Conda environment detected: {conda_env}")
 
         # Target conda.exe instead of app
@@ -1331,9 +1464,7 @@ def install(options: Optional[InstallOptions] = None) -> int:
                         f'Verification with "{mac_target_script}" failed; '
                         "retrying with the installer's own Python..."
                     )
-                    retry_ok = verify_launch_command(
-                        sys.executable, original_exe_path
-                    )
+                    retry_ok = verify_launch_command(sys.executable, original_exe_path)
                 if retry_ok:
                     mac_target_script = sys.executable
                 else:
@@ -1569,6 +1700,16 @@ def main() -> int:
         help="Search for the moleditpy executable in search paths, print the result, and exit.",
     )
     parser.add_argument(
+        "--exe-path",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to the moleditpy executable (or the Scripts/bin directory "
+            "holding it), for installations the automatic search cannot "
+            "find. Works with --check too."
+        ),
+    )
+    parser.add_argument(
         "--desktop",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -1610,11 +1751,16 @@ def main() -> int:
         return 0
 
     if args.check:
-        command_name = "moleditpy"
-        path = find_executable(command_name)
-        if not path and platform.system() == "Linux":
-            command_name = "moleditpy-linux"
+        command_name = EXECUTABLE_NAMES[0]
+        if args.exe_path:
+            path = resolve_manual_executable(args.exe_path)
+            if path:
+                command_name = Path(path).stem or command_name
+        else:
             path = find_executable(command_name)
+            if not path and platform.system() == "Linux":
+                command_name = EXECUTABLE_NAMES[1]
+                path = find_executable(command_name)
         if path:
             print(f"Success: Found executable '{command_name}' at: {path}")
 
@@ -1634,10 +1780,16 @@ def main() -> int:
                     return 1
             return 0
 
-        print(
-            f"Error: Executable '{command_name}' (or 'moleditpy-linux') "
-            "was not found in any search paths."
-        )
+        if args.exe_path:
+            print(
+                f"Error: the specified path is not a usable executable: {args.exe_path}"
+            )
+        else:
+            print(
+                f"Error: Executable '{EXECUTABLE_NAMES[0]}' (or "
+                f"'{EXECUTABLE_NAMES[1]}') was not found in any search paths."
+            )
+            print("If it lives elsewhere, re-run with --exe-path <path>.")
         return 1
 
     explicit_flags = (
@@ -1645,6 +1797,7 @@ def main() -> int:
         or args.app_menu is not None
         or args.file_assoc is not None
         or args.system
+        or args.exe_path is not None
     )
 
     options = InstallOptions(
@@ -1652,6 +1805,7 @@ def main() -> int:
         app_menu=bool(args.app_menu) if args.app_menu is not None else True,
         file_assoc=bool(args.file_assoc) if args.file_assoc is not None else True,
         system=args.system,
+        exe_path=args.exe_path,
     )
 
     # Interactive TUI when in a real terminal and nothing was decided on

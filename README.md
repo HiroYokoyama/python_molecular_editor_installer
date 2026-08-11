@@ -23,7 +23,7 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer
     ```
 
-    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. Move between widgets with **Tab** / **Shift+Tab** (the arrow keys also switch between the Install / Uninstall / Quit buttons). After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
+    Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope, executable **auto-detected**. The **Executable path** field at the bottom of the panel is optional — leave it empty to auto-detect, or type the path to the `moleditpy` executable (or the `Scripts`/`bin` folder holding it) when your installation lives somewhere the search does not cover. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. Move between widgets with **Tab** / **Shift+Tab** (the arrow keys also switch between the Install / Uninstall / Quit buttons). After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
 
     **Non-interactive / scripted use** (also what runs automatically when there is no terminal):
 
@@ -32,9 +32,19 @@ This package is a helper utility that automatically installs the correct version
     moleditpy-installer --desktop                # also create a Desktop shortcut
     moleditpy-installer --no-file-assoc          # skip the .pmeprj association
     sudo moleditpy-installer --system            # system-wide (admin terminal on Windows)
+    moleditpy-installer --exe-path /opt/env/bin/moleditpy   # point at the executable yourself
     ```
 
     Any explicit option skips the TUI.
+
+    **Manual executable path.** If the automatic search cannot find your installation, pass `--exe-path` (or fill in the TUI field). It accepts the executable itself or the directory holding it, expands `~` and environment variables, and strips surrounding quotes:
+
+    ```bash
+    moleditpy-installer --exe-path "~/my envs/chem/bin"        # a Scripts/bin directory
+    moleditpy-installer --check --exe-path C:\envs\chem\Scripts\moleditpy.exe
+    ```
+
+    A path given this way is never silently replaced by a search result: if it is wrong, the installer reports why and stops.
 
     > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
 
@@ -65,7 +75,7 @@ This package is a helper utility that automatically installs the correct version
     ```bash
     moleditpy-installer --check
     ```
-    This command returns exit code `0` if the executable is found, and `1` otherwise. On macOS it additionally verifies that the launcher's interpreter/script pairing can actually start MoleditPy.
+    This command returns exit code `0` if the executable is found, and `1` otherwise. On macOS it additionally verifies that the launcher's interpreter/script pairing can actually start MoleditPy. Add `--exe-path <path>` to validate a specific location instead of searching.
 
     For the complete list of directories scanned on Windows, macOS, and Linux, see [docs/path.md](docs/path.md).
 
@@ -103,6 +113,14 @@ This package is a helper utility that automatically installs the correct version
 - `.pmeprj` documents get their own file icon in file managers, matching Windows and macOS.
 
 `moleditpy-installer --uninstall` undoes all of the above for the current user (add `--system` for system-wide installs).
+
+## Version 3.1 highlights
+
+- **New:** manual executable path — `--exe-path` on the command line and an **Executable path** field in the TUI, for installations the automatic search cannot find. Accepts the executable or the directory holding it; a wrong path is reported instead of being silently replaced by a search result.
+- **Fixed:** `conda run` was applied to executables belonging to a *different* environment, producing a launcher that failed with `ModuleNotFoundError: No module named 'moleditpy'`. It is now used only when the executable really lives in the active `CONDA_PREFIX`.
+- **Fixed:** system-wide installs referenced icons in the installing user's private directory (`%LOCALAPPDATA%`, or `/root/.moleditpy` under `sudo`), so other users saw a blank icon. Shared scopes now use `%PROGRAMDATA%`, `/usr/share`, and `/usr/local/share` (macOS).
+- **Fixed:** on Windows, an earlier "Open with" choice pinned by Explorer kept overriding a freshly installed `.pmeprj` association.
+- **Fixed:** `--check` named the same command twice in its failure message on Linux.
 
 ## Version 3.0 highlights
 

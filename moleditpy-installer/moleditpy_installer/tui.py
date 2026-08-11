@@ -16,6 +16,7 @@ from textual.widgets import (
     Checkbox,
     Footer,
     Header,
+    Input,
     Label,
     RadioButton,
     RadioSet,
@@ -80,10 +81,24 @@ class InstallerApp(App):
         text-style: bold;
         color: $text;
     }
+    #options Checkbox {
+        /* flat 1-row checkboxes: the bordered default costs 3 rows each,
+           which pushes the log off an 80x24 screen */
+        border: none;
+        height: 1;
+        padding: 0;
+    }
     #scope {
         height: auto;
         border: none;
         padding: 0;
+    }
+    #exe_path {
+        /* flat, 1-row input: the panel must still fit in 80x24 */
+        border: none;
+        height: 1;
+        padding: 0 1;
+        background: $boost;
     }
     #buttons {
         height: auto;
@@ -136,6 +151,11 @@ class InstallerApp(App):
                     "System-wide (requires sudo / admin terminal)",
                     id="scope_system",
                 )
+            yield Label("Executable path (empty = auto-detect)")
+            yield Input(
+                placeholder="path to the moleditpy executable or its Scripts/bin folder",
+                id="exe_path",
+            )
         with Horizontal(id="buttons"):
             yield Button("Install", variant="success", id="install")
             yield Button("Uninstall", variant="error", id="remove")
@@ -167,6 +187,7 @@ class InstallerApp(App):
             app_menu=self.query_one("#app_menu", Checkbox).value,
             file_assoc=self.query_one("#file_assoc", Checkbox).value,
             system=self.query_one("#scope_system", RadioButton).value,
+            exe_path=self.query_one("#exe_path", Input).value.strip() or None,
         )
 
     def _set_busy(self, busy: bool) -> None:
@@ -183,7 +204,8 @@ class InstallerApp(App):
         else:
             self.call_from_thread(
                 self._set_detect_status,
-                "moleditpy executable not found — install it first (pip install moleditpy)",
+                "moleditpy executable not found — install it (pip install "
+                "moleditpy) or type its path below",
             )
 
     def _set_detect_status(self, text: str) -> None:
@@ -234,7 +256,8 @@ class InstallerApp(App):
             f"desktop={'yes' if options.desktop else 'no'}, "
             f"app menu={'yes' if options.app_menu else 'no'}, "
             f"file association={'yes' if options.file_assoc else 'no'}, "
-            f"scope={'system' if options.system else 'user'}"
+            f"scope={'system' if options.system else 'user'}, "
+            f"executable={options.exe_path or 'auto-detect'}"
         )
         self._set_status("Installing…")
         self.run_worker(
