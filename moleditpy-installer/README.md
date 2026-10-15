@@ -8,11 +8,24 @@ This package is a helper utility that automatically installs the correct version
 
 ![installer](https://raw.githubusercontent.com/HiroYokoyama/python_molecular_editor_installer/main/img/installer.png)
 
+## Quick start and command choice
+
+Use a dedicated virtual environment, or activate the environment where MoleditPy should live. See the [Windows/macOS/Linux quick start](https://github.com/HiroYokoyama/python_molecular_editor/wiki/Quick-Start) for commands that use an explicit environment path.
+
+```bash
+python -m pip install moleditpy-installer
+python -m moleditpy_installer
+```
+
+Both `python -m moleditpy_installer` and `moleditpy-installer` are supported. **Prefer the module form**: it runs under the Python you selected and avoids depending on the console script being on `PATH`. If `python` is not your environment's interpreter, substitute its full path (or `python3` on macOS/Linux outside an activated environment). Use that same interpreter for `-m pip`.
+
+Installing the package installs the app dependency. Running the installer configures launchers and file associations. For a non-interactive setup use `python -m moleditpy_installer --no-tui`; to inspect discovery first use `python -m moleditpy_installer --check`. The standalone Windows/macOS download is a separate distribution with different plugin-dependency limitations.
+
 ## How to Use
 
 1.  **Install**
     ```bash
-    pip install moleditpy-installer
+    python -m pip install moleditpy-installer
     ```
     This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
 
@@ -20,7 +33,7 @@ This package is a helper utility that automatically installs the correct version
     Run the following command in your terminal. In an interactive terminal this opens a TUI where you pick the components — Desktop shortcut, application-menu entry, `.pmeprj` file association — and the scope (per-user or system-wide), then press **Install**:
 
     ```bash
-    moleditpy-installer
+    python -m moleditpy_installer
     ```
 
     Defaults: Desktop shortcut **off**, application menu **on**, file association **on**, per-user scope, executable **auto-detected**. The **Executable path** field at the bottom of the panel is optional — leave it empty to auto-detect, or type the path to the `moleditpy` executable (or the `Scripts`/`bin` folder holding it) when your installation lives somewhere the search does not cover. The **Install** button is focused on start, so pressing **Enter** immediately installs with the defaults. Move between widgets with **Tab** / **Shift+Tab** (the arrow keys also switch between the Install / Uninstall / Quit buttons). After a successful install or uninstall the TUI stays open for two seconds, then exits and replays the full log in the terminal.
@@ -28,11 +41,11 @@ This package is a helper utility that automatically installs the correct version
     **Non-interactive / scripted use** (also what runs automatically when there is no terminal):
 
     ```bash
-    moleditpy-installer --no-tui                 # install with the defaults
-    moleditpy-installer --desktop                # also create a Desktop shortcut
-    moleditpy-installer --no-file-assoc          # skip the .pmeprj association
-    sudo moleditpy-installer --system            # system-wide (admin terminal on Windows)
-    moleditpy-installer --exe-path /opt/env/bin/moleditpy   # point at the executable yourself
+    python -m moleditpy_installer --no-tui                 # install with the defaults
+    python -m moleditpy_installer --desktop                # also create a Desktop shortcut
+    python -m moleditpy_installer --no-file-assoc          # skip the .pmeprj association
+    sudo /absolute/path/to/env/bin/python -m moleditpy_installer --system            # system-wide (admin terminal on Windows)
+    python -m moleditpy_installer --exe-path /opt/env/bin/moleditpy   # point at the executable yourself
     ```
 
     Any explicit option skips the TUI.
@@ -40,21 +53,21 @@ This package is a helper utility that automatically installs the correct version
     **Manual executable path.** If the automatic search cannot find your installation, pass `--exe-path` (or fill in the TUI field). It accepts the executable itself or the directory holding it, expands `~` and environment variables, and strips surrounding quotes:
 
     ```bash
-    moleditpy-installer --exe-path "~/my envs/chem/bin"        # a Scripts/bin directory
-    moleditpy-installer --check --exe-path C:\envs\chem\Scripts\moleditpy.exe
+    python -m moleditpy_installer --exe-path "~/my envs/chem/bin"        # a Scripts/bin directory
+    python -m moleditpy_installer --check --exe-path C:\envs\chem\Scripts\moleditpy.exe
     ```
 
     A path given this way is never silently replaced by a search result: if it is wrong, the installer reports why and stops.
 
     > **Security Note:** File associations for `.pmeraw` files have been intentionally removed. Opening `.pmeraw` files downloaded from the internet can be potentially unsecure, so they are no longer automatically associated with the application.
 
-    You can also invoke it as a Python module (use an **underscore**, not a hyphen):
+    The console-script alternative is also supported when its Scripts/bin directory is on `PATH`:
 
     ```bash
-    python -m moleditpy_installer
+    moleditpy-installer
     ```
 
-    > **Note:** `python -m moleditpy-installer` (with a hyphen) is invalid Python syntax and will not work. Always use the underscore form (`moleditpy_installer`) with `-m`.
+    > **Note:** `python -m moleditpy-installer` (with a hyphen) does not name this package’s Python module and will not work. Always use the underscore form (`moleditpy_installer`) with `-m`.
 
     > **Tip:** Run the installer from the Python environment where `moleditpy` is installed (e.g. after `conda activate <env>`). The installer verifies the launch command and warns you if the pairing cannot start MoleditPy.
 
@@ -62,18 +75,18 @@ This package is a helper utility that automatically installs the correct version
     To remove the shortcuts, unregister file associations, and clean up extracted icon files, run (add `--system` for a system-wide install; `--remove` remains as a deprecated alias):
 
     ```bash
-    moleditpy-installer --uninstall
-    # or
     python -m moleditpy_installer --uninstall
+    # or, if the console script is on PATH
+    moleditpy-installer --uninstall
     ```
 
-    > **Note:** this removes the shortcuts and file associations only. To fully remove MoleditPy itself, also run `pip uninstall moleditpy` (or `pip uninstall moleditpy-linux` on Linux).
+    > **Note:** this removes the shortcuts and file associations only. To fully remove MoleditPy itself, also run `python -m pip uninstall moleditpy` (or `python -m pip uninstall moleditpy-linux` on Linux).
 
 4.  **Check Executable Location**
     To search for the `moleditpy` executable in the search paths and print the located path:
 
     ```bash
-    moleditpy-installer --check
+    python -m moleditpy_installer --check
     ```
     This command returns exit code `0` if the executable is found, and `1` otherwise. On macOS it additionally verifies that the launcher's interpreter/script pairing can actually start MoleditPy. Add `--exe-path <path>` to validate a specific location instead of searching.
 
@@ -83,14 +96,14 @@ This package is a helper utility that automatically installs the correct version
     To show the version of the installer:
 
     ```bash
-    moleditpy-installer --version
+    python -m moleditpy_installer --version
     ```
 
 6.  **Help**
     To see all available options, run:
 
     ```bash
-    moleditpy-installer --help
+    python -m moleditpy_installer --help
     ```
 
 ## What the installer sets up
@@ -139,3 +152,5 @@ This package is a helper utility that automatically installs the correct version
 - **New:** `.pmeprj` double-click support and document icon on Linux (per-user MIME registration).
 - **New:** `--check` verifies launchability on macOS; `--remove` also unregisters the bundle from Launch Services and removes extracted icons.
 - Icons no longer live in the temp folder (Windows shortcut/registry icons no longer break after cleanup).
+
+Replace `/absolute/path/to/env/bin/python` with the actual environment interpreter for a system-wide Unix install. On Windows, use the intended environment’s Python from an administrator terminal.
