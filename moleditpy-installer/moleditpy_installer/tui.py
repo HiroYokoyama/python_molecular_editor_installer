@@ -136,6 +136,7 @@ class InstallerApp(App):
         self._show_uninstall_note = False
         self._action_started = False
         self._action_succeeded = False
+        self._busy = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -191,14 +192,14 @@ class InstallerApp(App):
         )
 
     def _set_busy(self, busy: bool) -> None:
-        for button_id in ("install", "remove"):
+        self._busy = busy
+        for button_id in ("install", "remove", "quit"):
             self.query_one(f"#{button_id}", Button).disabled = busy
 
     def _detect_executable(self) -> None:
-        with contextlib.redirect_stdout(io.StringIO()):
-            path = installer.find_executable("moleditpy")
-            if not path and platform.system() == "Linux":
-                path = installer.find_executable("moleditpy-linux")
+        path = installer.find_executable("moleditpy", quiet=True)
+        if not path and platform.system() == "Linux":
+            path = installer.find_executable("moleditpy-linux", quiet=True)
         if path:
             self.call_from_thread(self._set_detect_status, f"Found moleditpy: {path}")
         else:
@@ -247,6 +248,8 @@ class InstallerApp(App):
     # ------------------------------------------------------------------ #
 
     def action_install(self) -> None:
+        if self._busy:
+            return
         options = self._selected_options()
         self._action_started = True
         self._set_busy(True)
@@ -268,6 +271,8 @@ class InstallerApp(App):
         )
 
     def action_remove(self) -> None:
+        if self._busy:
+            return
         system_scope = self.query_one("#scope_system", RadioButton).value
         self._action_started = True
         self._set_busy(True)
@@ -307,11 +312,12 @@ class InstallerApp(App):
         elif event.button.id == "remove":
             self.action_remove()
         elif event.button.id == "quit":
-            self.exit(self.exit_code)
+            self.action_quit()
 
     def action_quit(self) -> None:
         # Match the Quit button: keep the exit code of a failed action.
-        self.exit(self.exit_code)
+        if not self._busy:
+            self.exit(self.exit_code)
 
 
 def run_tui() -> int:

@@ -189,7 +189,7 @@ def get_icon_path(system_scope: bool = False) -> Optional[str]:
     return _extract_data_file(icon_name, system=system_scope)
 
 
-def find_executable(name: str) -> Optional[str]:
+def find_executable(name: str, *, quiet: bool = False) -> Optional[str]:
     """
     Finds the path to the specified executable.
 
@@ -202,6 +202,7 @@ def find_executable(name: str) -> Optional[str]:
 
     Args:
         name (str): The name of the executable (e.g., 'moleditpy').
+        quiet (bool): Suppress discovery messages without redirecting stdout.
 
     Returns:
         Optional[str]: The absolute path to the executable, or None if not found.
@@ -214,12 +215,15 @@ def find_executable(name: str) -> Optional[str]:
             candidate = candidate.with_suffix(".exe")
         if candidate.is_file() and os.access(candidate, os.X_OK):
             result = str(candidate)
-            print(f"Found executable: {result}")
+            if not quiet:
+                print(f"Found executable: {result}")
             return result
         return None
 
     # 1 & 2. Dirs relative to the Python interpreter (reliable even under `python -m`)
-    python_dir = Path(sys.executable).resolve().parent
+    # POSIX venv interpreters are commonly symlinks to the base Python.
+    # Resolving the link would search the base environment before the venv.
+    python_dir = Path(os.path.abspath(sys.executable)).parent
     for scripts_dir in (
         python_dir / "Scripts",
         python_dir,
@@ -413,7 +417,8 @@ def find_executable(name: str) -> Optional[str]:
     # 5. Fallback: system PATH
     path_from_shutil = shutil.which(name)
     if path_from_shutil:
-        print(f"Found executable in system PATH: {path_from_shutil}")
+        if not quiet:
+            print(f"Found executable in system PATH: {path_from_shutil}")
         return path_from_shutil
 
     return None
@@ -818,8 +823,24 @@ def _clean_linux_mimeapps() -> None:
             continue
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
-            kept = [line for line in lines if LINUX_MIME_TYPE not in line]
-            if len(kept) != len(lines):
+            kept = []
+            for line in lines:
+                key, separator, value = line.partition("=")
+                handlers = value.split(";")
+                if (
+                    separator
+                    and key.strip() == LINUX_MIME_TYPE
+                    and "MoleditPy.desktop" in handlers
+                ):
+                    remaining = [
+                        handler for handler in handlers
+                        if handler and handler != "MoleditPy.desktop"
+                    ]
+                    if remaining:
+                        kept.append(f"{key}={';'.join(remaining)};")
+                else:
+                    kept.append(line)
+            if kept != lines:
                 path.write_text("\n".join(kept) + "\n", encoding="utf-8")
                 print(f"  Cleaned {path}")
         except OSError as e:
@@ -1400,7 +1421,8 @@ def install(options: Optional[InstallOptions] = None) -> int:
             if options.desktop or options.app_menu:
                 if system == "Linux" and options.system:
                     # pyshortcuts only writes per-user locations
-                    write_linux_system_desktop_entry(full_command, icon_path)
+                    if not write_linux_system_desktop_entry(full_command, icon_path):
+                        return 1
                     if options.desktop:
                         print(
                             "Note: Desktop shortcuts are per-user; "
@@ -1434,7 +1456,8 @@ def install(options: Optional[InstallOptions] = None) -> int:
                     )
 
             if system == "Linux" and options.file_assoc:
-                register_file_associations_linux(system=options.system)
+                if not register_file_associations_linux(system=options.system):
+                    return 1
 
         elif system == "Darwin":
             if not (options.desktop or options.app_menu):
@@ -1478,8 +1501,8 @@ def install(options: Optional[InstallOptions] = None) -> int:
                         "moleditpy is installed (e.g. after 'conda activate <env>')."
                     )
 
-            mac_escaped_script = mac_target_script.replace('"', '\\"')
-            applescript_escaped_args = f'"{original_exe_path}"'.replace('"', '\\"')
+            mac_escaped_script = mac_target_script.replace("\\", "\\\\").replace('"', '\\"')
+            mac_escaped_exe = original_exe_path.replace("\\", "\\\\").replace('"', '\\"')
 
             # Run MoleditPy inside a Terminal window so Python output and
             # errors are always visible to the user (a silent GUI launch
@@ -1488,7 +1511,7 @@ def install(options: Optional[InstallOptions] = None) -> int:
             # away instead of staying "running" in the Dock.
             applescript_code = f"""
 on launch_moleditpy(extra_args)
-    set base_cmd to quoted form of "{mac_escaped_script}" & " {applescript_escaped_args}"
+    set base_cmd to quoted form of "{mac_escaped_script}" & " " & quoted form of "{mac_escaped_exe}"
     tell application "Terminal"
         activate
         do script base_cmd & extra_args
@@ -1566,7 +1589,9 @@ end open
                     shutil.copy2(icon_path, app_resources / "applet.icns")
 
                 if options.file_assoc:
-                    register_file_associations_darwin(target_app_path)
+                    if not register_file_associations_darwin(target_app_path):
+                        print("Failed to configure the app bundle's file association.")
+                        return 1
 
                 # Re-sign AFTER all bundle modifications, or Apple Silicon
                 # refuses to launch the app (silently from Finder).
@@ -1627,9 +1652,10 @@ end open
         if not file_icon_path:
             file_icon_path = icon_path
 
-        register_file_associations_windows(
+        if not register_file_associations_windows(
             str(original_exe_path), file_icon_path, system=options.system
-        )
+        ):
+            return 1
 
     print("\nYou can remove the shortcut and file associations by running:")
     print("  moleditpy-installer --remove")

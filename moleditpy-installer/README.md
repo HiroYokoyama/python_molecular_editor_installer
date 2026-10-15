@@ -127,6 +127,15 @@ Installing the package installs the app dependency. Running the installer config
 
 `moleditpy-installer --uninstall` undoes all of the above for the current user (add `--system` for system-wide installs).
 
+## Version 3.1.3 fixes
+
+- Report failed file-association and Linux system-launcher setup correctly.
+- Serialize TUI actions and preserve logging while background discovery runs.
+- Preserve other Linux MIME handlers during uninstall and prefer the active virtual environment during discovery.
+- Quote macOS launcher paths safely and validate release tags against package metadata.
+
+See [the changelog](https://github.com/HiroYokoyama/python_molecular_editor_installer/blob/main/CHANGELOG.md) for details.
+
 ## Version 3.1 highlights
 
 - **New:** manual executable path — `--exe-path` on the command line and an **Executable path** field in the TUI, for installations the automatic search cannot find. Accepts the executable or the directory holding it; a wrong path is reported instead of being silently replaced by a search result.

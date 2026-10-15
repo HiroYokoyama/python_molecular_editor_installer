@@ -1203,7 +1203,7 @@ class TestInstall:
         mock_verify.assert_called_once_with(env_python, fake_exe)
         args = mock_run.call_args[0][0]
         applescript = args[args.index("-e") + 1]
-        assert env_python in applescript
+        assert env_python.replace("\\", "\\\\").replace('"', '\\"') in applescript
 
     def test_install_darwin_falls_back_to_sys_executable(self, tmp_path):
         """If the paired interpreter cannot launch moleditpy but
@@ -1238,7 +1238,7 @@ class TestInstall:
 
         args = mock_run.call_args[0][0]
         applescript = args[args.index("-e") + 1]
-        assert sys.executable in applescript
+        assert sys.executable.replace("\\", "\\\\").replace('"', '\\"') in applescript
         assert bad_python not in applescript
 
     def test_install_darwin_copies_app_to_applications(self, tmp_path):
