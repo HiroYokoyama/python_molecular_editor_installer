@@ -4,11 +4,9 @@
 [![PyPI Version](https://img.shields.io/pypi/v/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 
-This package is a helper utility that installs the unified `moleditpy >= 5.0.0a1, < 6` package on every supported OS, creates an application menu shortcut, and registers the `.pmeprj` double-click file association on Windows, macOS, and Linux.
+This package is a helper utility that installs the unified MoleditPy 5 package on every supported OS, creates an application menu shortcut, and registers the `.pmeprj` double-click file association on Windows, macOS, and Linux.
 
 ![installer](https://raw.githubusercontent.com/HiroYokoyama/python_molecular_editor_installer/main/img/installer.png)
-
-Install the helper from PyPI using the commands below. To install the alpha app directly, use `python -m pip install MoleditPy==5.0.0a1`.
 
 ## Quick start and command choice
 
@@ -29,7 +27,7 @@ Installing the package installs the app dependency. Running the installer config
     ```bash
     python -m pip install moleditpy-installer
     ```
-    This installs the unified `moleditpy >= 5.0.0a1, < 6` package as a dependency. Python 3.9 through 3.14 is supported. The helper creates shortcuts and file associations; it does not build a frozen application.
+    This installs the unified MoleditPy 5 package as a dependency. Python 3.9 through 3.14 is supported. The helper creates shortcuts and file associations; it does not build a frozen application.
 
 2.  **Run the interactive installer (TUI)**
     Run the following command in your terminal. In an interactive terminal this opens a TUI where you pick the components — Desktop shortcut, application-menu entry, `.pmeprj` file association — and the scope (per-user or system-wide), then press **Install**:
