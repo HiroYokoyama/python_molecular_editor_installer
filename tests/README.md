@@ -88,7 +88,7 @@ Every path resolution test mocks `platform.system()` and file check routines so 
 
 | Job | Matrix | What it does |
 |---|---|---|
-| `test` | ubuntu / windows / macOS × Python 3.10, 3.11, 3.13 | the pytest suite |
+| `test` | ubuntu / windows / macOS × Python 3.9, 3.10, 3.11, 3.13 | the pytest suite |
 | `smoke-macos` | macOS | a real end-to-end install and uninstall, per-user and system (sudo) |
 | `smoke-windows` | Windows | the same, including the registry and Start Menu paths |
 | `smoke-linux` | Ubuntu | the same, including `/usr/share` system scope |
