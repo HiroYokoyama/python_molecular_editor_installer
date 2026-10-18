@@ -8,14 +8,14 @@ This package is a helper utility that installs the unified `moleditpy >= 5.0.0a1
 
 ![installer](https://raw.githubusercontent.com/HiroYokoyama/python_molecular_editor_installer/main/img/installer.png)
 
-This migration branch targets MoleditPy 5. Its helper update has not been published to PyPI; the existing PyPI release still targets the earlier app. Install this branch explicitly (requires Git) or use `python -m pip install MoleditPy==5.0.0a1` to install the app without shortcut setup.
+Install the helper from PyPI using the commands below. To install the alpha app directly, use `python -m pip install MoleditPy==5.0.0a1`.
 
 ## Quick start and command choice
 
 Use a dedicated virtual environment, or activate the environment where MoleditPy should live. See the [Windows/macOS/Linux quick start](https://github.com/HiroYokoyama/python_molecular_editor/wiki/Quick-Start) for commands that use an explicit environment path.
 
 ```bash
-python -m pip install "moleditpy-installer @ git+https://github.com/HiroYokoyama/python_molecular_editor_installer.git@migrate/unified-moleditpy-5#subdirectory=moleditpy-installer"
+python -m pip install moleditpy-installer
 python -m moleditpy_installer
 ```
 
@@ -27,7 +27,7 @@ Installing the package installs the app dependency. Running the installer config
 
 1.  **Install**
     ```bash
-    python -m pip install "moleditpy-installer @ git+https://github.com/HiroYokoyama/python_molecular_editor_installer.git@migrate/unified-moleditpy-5#subdirectory=moleditpy-installer"
+    python -m pip install moleditpy-installer
     ```
     This installs the unified `moleditpy >= 5.0.0a1, < 6` package as a dependency. Python 3.9 through 3.14 is supported. The helper creates shortcuts and file associations; it does not build a frozen application.
 

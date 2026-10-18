@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Use the unified MoleditPy 5 package on all operating systems, with Python 3.9–3.14 support. This helper migration is not published yet; install its branch explicitly.
+- Use the unified MoleditPy 5 package on all operating systems, with Python 3.9–3.14 support.
 
 ## [3.1.3] - 2026-10-15
 
