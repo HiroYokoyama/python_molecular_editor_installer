@@ -4,7 +4,7 @@
 [![PyPI Version](https://img.shields.io/pypi/v/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/moleditpy-installer.svg)](https://pypi.org/project/moleditpy-installer/)
 
-This package is a helper utility that automatically installs the correct version of `moleditpy` or `moleditpy-linux` for your OS, creates an application menu shortcut, and registers the `.pmeprj` double-click file association on Windows, macOS, and Linux.
+This package is a helper utility that installs the unified `moleditpy >= 5, < 6` package on every supported OS, creates an application menu shortcut, and registers the `.pmeprj` double-click file association on Windows, macOS, and Linux.
 
 ![installer](https://raw.githubusercontent.com/HiroYokoyama/python_molecular_editor_installer/main/img/installer.png)
 
@@ -27,7 +27,7 @@ Installing the package installs the app dependency. Running the installer config
     ```bash
     python -m pip install moleditpy-installer
     ```
-    This will automatically install the correct `moleditpy` package (for Windows/macOS) or `moleditpy-linux` (for Linux) as a dependency.
+    This installs the unified `moleditpy >= 5, < 6` package as a dependency. Python 3.10 or newer is required. The helper creates shortcuts and file associations; it does not build a frozen application.
 
 2.  **Run the interactive installer (TUI)**
     Run the following command in your terminal. In an interactive terminal this opens a TUI where you pick the components — Desktop shortcut, application-menu entry, `.pmeprj` file association — and the scope (per-user or system-wide), then press **Install**:
@@ -80,7 +80,7 @@ Installing the package installs the app dependency. Running the installer config
     moleditpy-installer --uninstall
     ```
 
-    > **Note:** this removes the shortcuts and file associations only. To fully remove MoleditPy itself, also run `python -m pip uninstall moleditpy` (or `python -m pip uninstall moleditpy-linux` on Linux).
+    > **Note:** this removes the shortcuts and file associations only. To fully remove MoleditPy itself, also run `python -m pip uninstall moleditpy`.
 
 4.  **Check Executable Location**
     To search for the `moleditpy` executable in the search paths and print the located path:
