@@ -2,6 +2,8 @@
 
 This document details the search order and directories scanned by `moleditpy-installer` to locate the `moleditpy` (or `moleditpy-linux`) executable.
 
+MoleditPy 5 installs the `moleditpy` executable on every OS. The `moleditpy-linux` name is retained only for discovering older installations, not as a MoleditPy 5 dependency or new package.
+
 The installer scans these paths sequentially and returns the first valid, executable file it finds.
 
 ---
