@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [3.1.4] - 2026-10-19
+
 ### Changed
 
 - Use the unified MoleditPy 5 package on all operating systems, with Python 3.9–3.14 support.
