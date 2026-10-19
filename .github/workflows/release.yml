@@ -120,7 +120,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add moleditpy-installer/pyproject.toml
-          git diff --staged --quiet || git commit -m "Bump version to ${APP_VERSION}"
+          git diff --staged --quiet || git commit -m "Bump version to ${APP_VERSION}" -m "Assisted-by: GPT-6.1 Sol"
           git tag "v${APP_VERSION}"
           git push origin HEAD:${{ github.ref_name }}
           git push origin "v${APP_VERSION}"
